@@ -47,6 +47,7 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
     PlanetpodSensorEntityDescription(
         key="online",
         name="Online",
+        translation_key="online",
         device_class=SensorDeviceClass.ENUM,
         options=["online", "offline"],
         value_fn=lambda pod: "online" if pod["status"]["online"] else "offline",
@@ -54,6 +55,7 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
     PlanetpodSensorEntityDescription(
         key="charge_status",
         name="Charge Status",
+        translation_key="charge_status",
         device_class=SensorDeviceClass.ENUM,
         options=["charge", "discharge", "idle"],
         value_fn=lambda pod: pod["status"]["charge_status"],
@@ -61,6 +63,7 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
     PlanetpodSensorEntityDescription(
         key="app_mode",
         name="App Mode",
+        translation_key="app_mode",
         device_class=SensorDeviceClass.ENUM,
         options=["cash", "solar", "solarSmart", "solarPure", "open"],
         value_fn=lambda pod: pod["status"]["app_mode"],
@@ -146,6 +149,7 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
     PlanetpodSensorEntityDescription(
         key="relay_status",
         name="Relay Status",
+        translation_key="relay_status",
         device_class=SensorDeviceClass.ENUM,
         options=["ON", "OFF"],
         value_fn=lambda pod: pod["advanced"]["relay_status"],

@@ -21,7 +21,7 @@
       "unknown": "Unexpected error. Check the logs for details."
     },
     "abort": {
-      "already_configured": "This API key is already configured."
+      "already_configured": "This Planetpod grid is already configured."
     }
   },
   "entity": {

@@ -5,8 +5,6 @@ import asyncio
 import logging
 from typing import Any
 
-import hashlib
-
 import aiohttp
 import voluptuous as vol
 from homeassistant import config_entries
@@ -19,22 +17,30 @@ from .const import CONF_API_KEY, CONF_API_URL, DEFAULT_API_URL, DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 
-async def _validate_connection(hass: HomeAssistant, api_url: str, api_key: str) -> str | None:
-    """Return None on success, or an error key string on failure."""
+async def _validate_connection(
+    hass: HomeAssistant, api_url: str, api_key: str
+) -> tuple[int | None, str | None]:
+    """Return the grid id on success, or an error key string on failure."""
     session = async_get_clientsession(hass)
     url = f"{api_url.rstrip('/')}/open/v1/grid/status"
     headers = {"Authorization": f"Bearer {api_key}"}
     try:
         async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
             if resp.status == 401:
-                return "invalid_auth"
+                return None, "invalid_auth"
             if resp.status == 404:
-                return "grid_not_found"
+                return None, "grid_not_found"
             if resp.status != 200:
-                return "cannot_connect"
+                return None, "cannot_connect"
+            payload = await resp.json()
     except (aiohttp.ClientError, asyncio.TimeoutError):
-        return "cannot_connect"
-    return None
+        return None, "cannot_connect"
+
+    grid_id = payload.get("grid_id")
+    if not isinstance(grid_id, int):
+        return None, "unknown"
+
+    return grid_id, None
 
 
 class PlanetpodConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -49,7 +55,7 @@ class PlanetpodConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            error = await _validate_connection(
+            grid_id, error = await _validate_connection(
                 self.hass,
                 user_input[CONF_API_URL],
                 user_input[CONF_API_KEY],
@@ -57,8 +63,7 @@ class PlanetpodConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if error:
                 errors["base"] = error
             else:
-                key_uid = hashlib.sha256(user_input[CONF_API_KEY].encode()).hexdigest()[:16]
-                await self.async_set_unique_id(f"planetpod_{key_uid}")
+                await self.async_set_unique_id(f"planetpod_grid_{grid_id}")
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(
                     title="Planetpod",
