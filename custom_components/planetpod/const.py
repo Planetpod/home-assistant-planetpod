@@ -4,11 +4,10 @@ from __future__ import annotations
 DOMAIN = "planetpod"
 MANUFACTURER = "Planetpod"
 
-CONF_HOST = "host"
-CONF_PORT = "port"
-CONF_USERNAME = "username"
-CONF_PASSWORD = "password"
+CONF_API_URL = "api_url"
+CONF_API_KEY = "api_key"
 
+DEFAULT_API_URL = "https://api.planetpod.nl"
 DEFAULT_SCAN_INTERVAL = 60
 
 ATTR_ATTRIBUTION = "Data provided by Planetpod"

@@ -1,0 +1,105 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Planetpod",
+        "description": "Enter your Planetpod Open API credentials. You can generate a key in the Planetpod app under Settings → API.",
+        "data": {
+          "api_url": "API URL",
+          "api_key": "API Key"
+        },
+        "data_description": {
+          "api_url": "Base URL of the Planetpod API (leave default unless self-hosted)",
+          "api_key": "Bearer token starting with pp_"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to reach the Planetpod API. Check the URL and your network.",
+      "invalid_auth": "Invalid API key. Make sure the key starts with pp_ and has not expired.",
+      "grid_not_found": "No grid found for this API key.",
+      "unknown": "Unexpected error. Check the logs for details."
+    },
+    "abort": {
+      "already_configured": "This API key is already configured."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "soc_pct": {
+        "name": "State of Charge"
+      },
+      "online": {
+        "name": "Online",
+        "state": {
+          "online": "Online",
+          "offline": "Offline"
+        }
+      },
+      "charge_status": {
+        "name": "Charge Status",
+        "state": {
+          "charge": "Charging",
+          "discharge": "Discharging",
+          "idle": "Idle"
+        }
+      },
+      "app_mode": {
+        "name": "App Mode",
+        "state": {
+          "cash": "Cash",
+          "solar": "Solar",
+          "solarSmart": "Solar Smart",
+          "solarPure": "Solar Pure",
+          "open": "Open"
+        }
+      },
+      "pod_mode": {
+        "name": "Pod Mode"
+      },
+      "deployed_power_kw": {
+        "name": "Deployed Power"
+      },
+      "requested_power_kw": {
+        "name": "Requested Power"
+      },
+      "received_by_pod_power_kw": {
+        "name": "Received by Pod Power"
+      },
+      "max_charge_power_kw": {
+        "name": "Max Charge Power"
+      },
+      "max_discharge_power_kw": {
+        "name": "Max Discharge Power"
+      },
+      "soh_pct": {
+        "name": "State of Health"
+      },
+      "avg_battery_temp_c": {
+        "name": "Battery Temperature"
+      },
+      "wifi_rssi_dbm": {
+        "name": "WiFi Signal Strength"
+      },
+      "avg_ac_voltage_v": {
+        "name": "AC Voltage"
+      },
+      "relay_status": {
+        "name": "Relay Status",
+        "state": {
+          "ON": "On",
+          "OFF": "Off"
+        }
+      },
+      "total_cycles": {
+        "name": "Total Cycles"
+      },
+      "soc_upper_limit_pct": {
+        "name": "SoC Upper Limit"
+      },
+      "soc_lower_limit_pct": {
+        "name": "SoC Lower Limit"
+      }
+    }
+  }
+}
