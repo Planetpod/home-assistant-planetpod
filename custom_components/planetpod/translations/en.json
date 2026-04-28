@@ -18,6 +18,8 @@
       "cannot_connect": "Unable to reach the Planetpod API. Check the URL and your network.",
       "invalid_auth": "Invalid API key. Make sure the key starts with pp_ and has not expired.",
       "grid_not_found": "No grid found for this API key.",
+      "no_data_yet": "Planetpod API is reachable, but no pod data is available yet for this grid. Try again shortly.",
+      "invalid_response": "Planetpod API returned an unexpected response format.",
       "unknown": "Unexpected error. Check the logs for details."
     },
     "abort": {

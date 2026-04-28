@@ -17,6 +17,41 @@ from .const import CONF_API_KEY, CONF_API_URL, DEFAULT_API_URL, DOMAIN
 _LOGGER = logging.getLogger(__name__)
 
 
+def _is_valid_grid_payload(payload: Any) -> bool:
+    """Validate minimum open API response contract for grid status."""
+    return (
+        isinstance(payload, dict)
+        and isinstance(payload.get("grid_id"), int)
+        and isinstance(payload.get("pods"), list)
+    )
+
+
+def _classify_404_error(payload: dict[str, Any] | None) -> str:
+    """Map backend 404 payloads to more specific config flow errors."""
+    if not payload:
+        return "grid_not_found"
+
+    message = payload.get("message")
+    if isinstance(message, str):
+        normalized = message.lower()
+        if "no pods found" in normalized or "no pod status available" in normalized:
+            return "no_data_yet"
+
+    return "grid_not_found"
+
+
+async def _read_json_payload(resp: aiohttp.ClientResponse) -> dict[str, Any] | None:
+    """Read JSON body safely without assuming content type or shape."""
+    try:
+        payload = await resp.json(content_type=None)
+    except (aiohttp.ContentTypeError, ValueError):
+        return None
+
+    if not isinstance(payload, dict):
+        return None
+    return payload
+
+
 async def _validate_connection(
     hass: HomeAssistant, api_url: str, api_key: str
 ) -> tuple[int | None, str | None]:
@@ -29,18 +64,20 @@ async def _validate_connection(
             if resp.status == 401:
                 return None, "invalid_auth"
             if resp.status == 404:
-                return None, "grid_not_found"
+                return None, _classify_404_error(await _read_json_payload(resp))
             if resp.status != 200:
                 return None, "cannot_connect"
-            payload = await resp.json()
+            payload = await _read_json_payload(resp)
     except (aiohttp.ClientError, asyncio.TimeoutError):
         return None, "cannot_connect"
 
-    grid_id = payload.get("grid_id")
-    if not isinstance(grid_id, int):
-        return None, "unknown"
+    if payload is None or not _is_valid_grid_payload(payload):
+        return None, "invalid_response"
 
-    return grid_id, None
+    if len(payload["pods"]) == 0:
+        return None, "no_data_yet"
+
+    return payload["grid_id"], None
 
 
 class PlanetpodConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
