@@ -155,7 +155,7 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
     PlanetpodSensorEntityDescription(
         key="total_cycles",
         name="Total Cycles",
-        state_class=SensorStateClass.TOTAL_INCREASING,
+        state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda pod: pod["battery"]["total_cycles"],
     ),
     PlanetpodSensorEntityDescription(
