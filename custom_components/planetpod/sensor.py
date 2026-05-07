@@ -65,7 +65,7 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
         name="App Mode",
         translation_key="app_mode",
         device_class=SensorDeviceClass.ENUM,
-        options=["cash", "solar", "solarSmart", "solarPure", "open"],
+        options=["cash", "solar", "solarSmart", "solarPure"],
         value_fn=lambda pod: pod["status"]["app_mode"],
     ),
     PlanetpodSensorEntityDescription(
@@ -134,7 +134,6 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
         native_unit_of_measurement=SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
         device_class=SensorDeviceClass.SIGNAL_STRENGTH,
         state_class=SensorStateClass.MEASUREMENT,
-        entity_registry_enabled_default=False,
         value_fn=lambda pod: pod["advanced"]["wifi_rssi_dbm"],
     ),
     PlanetpodSensorEntityDescription(
@@ -143,7 +142,6 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
         native_unit_of_measurement=UnitOfElectricPotential.VOLT,
         device_class=SensorDeviceClass.VOLTAGE,
         state_class=SensorStateClass.MEASUREMENT,
-        entity_registry_enabled_default=False,
         value_fn=lambda pod: pod["advanced"]["avg_ac_voltage_v"],
     ),
     PlanetpodSensorEntityDescription(
@@ -165,7 +163,6 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
         name="SoC Upper Limit",
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
-        entity_registry_enabled_default=False,
         value_fn=lambda pod: pod["battery"]["soc_upper_limit_pct"],
     ),
     PlanetpodSensorEntityDescription(
@@ -173,7 +170,6 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
         name="SoC Lower Limit",
         native_unit_of_measurement=PERCENTAGE,
         state_class=SensorStateClass.MEASUREMENT,
-        entity_registry_enabled_default=False,
         value_fn=lambda pod: pod["battery"]["soc_lower_limit_pct"],
     ),
 )
