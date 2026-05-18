@@ -13,17 +13,9 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import CONF_API_KEY, CONF_API_URL, DEFAULT_SCAN_INTERVAL, DOMAIN
+from .helpers import is_valid_grid_payload, read_json_payload
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def _is_valid_grid_payload(payload: Any) -> bool:
-    """Validate minimum open API response contract for grid status."""
-    return (
-        isinstance(payload, dict)
-        and isinstance(payload.get("grid_id"), int)
-        and isinstance(payload.get("pods"), list)
-    )
 
 
 def _is_no_data_404(payload: dict[str, Any] | None) -> bool:
@@ -37,18 +29,6 @@ def _is_no_data_404(payload: dict[str, Any] | None) -> bool:
 
     normalized = message.lower()
     return "no pods found" in normalized or "no pod status available" in normalized
-
-
-async def _read_json_payload(resp: aiohttp.ClientResponse) -> dict[str, Any] | None:
-    """Read JSON body safely without assuming content type or shape."""
-    try:
-        payload = await resp.json(content_type=None)
-    except (aiohttp.ContentTypeError, ValueError):
-        return None
-
-    if not isinstance(payload, dict):
-        return None
-    return payload
 
 
 class PlanetpodDataUpdateCoordinator(DataUpdateCoordinator):
@@ -81,7 +61,7 @@ class PlanetpodDataUpdateCoordinator(DataUpdateCoordinator):
                 if resp.status == 401:
                     raise UpdateFailed("Invalid API key (401 Unauthorized)")
                 if resp.status == 404:
-                    payload = await _read_json_payload(resp)
+                    payload = await read_json_payload(resp)
                     if _is_no_data_404(payload):
                         existing_grid_id = (
                             self.data.get("grid_id")
@@ -93,8 +73,8 @@ class PlanetpodDataUpdateCoordinator(DataUpdateCoordinator):
                     raise UpdateFailed("Grid not found (404)")
                 if resp.status != 200:
                     raise UpdateFailed(f"Unexpected status {resp.status}")
-                payload = await _read_json_payload(resp)
-                if payload is None or not _is_valid_grid_payload(payload):
+                payload = await read_json_payload(resp)
+                if payload is None or not is_valid_grid_payload(payload):
                     raise UpdateFailed("Planetpod API returned an invalid response contract")
                 return payload
         except (aiohttp.ClientError, asyncio.TimeoutError) as err:
