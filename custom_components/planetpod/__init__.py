@@ -2,17 +2,15 @@
 from __future__ import annotations
 
 import logging
-from typing import Final
-
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
+from .const import DOMAIN
 from .coordinator import PlanetpodDataUpdateCoordinator
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
-DOMAIN: Final = "planetpod"
 PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 
