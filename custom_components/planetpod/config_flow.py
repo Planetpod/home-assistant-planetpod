@@ -13,7 +13,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import CONF_API_KEY, CONF_API_URL, DEFAULT_API_URL, DOMAIN
+from .const import CONF_API_KEY, DEFAULT_API_URL, DOMAIN
 from .helpers import is_valid_grid_payload, read_json_payload
 
 _LOGGER = logging.getLogger(__name__)
@@ -34,11 +34,11 @@ def _classify_404_error(payload: dict[str, Any] | None) -> str:
 
 
 async def _validate_connection(
-    hass: HomeAssistant, api_url: str, api_key: str
+    hass: HomeAssistant, api_key: str
 ) -> tuple[int | None, str | None]:
     """Return the grid id on success, or an error key string on failure."""
     session = async_get_clientsession(hass)
-    url = f"{api_url.rstrip('/')}/open/v1/grid/status"
+    url = f"{DEFAULT_API_URL}/open/v1/grid/status"
     headers = {"Authorization": f"Bearer {api_key}"}
     try:
         async with session.get(url, headers=headers, timeout=aiohttp.ClientTimeout(total=10)) as resp:
@@ -105,11 +105,7 @@ class PlanetpodConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            grid_id, error = await _validate_connection(
-                self.hass,
-                user_input[CONF_API_URL],
-                user_input[CONF_API_KEY],
-            )
+            grid_id, error = await _validate_connection(self.hass, user_input[CONF_API_KEY])
             if error:
                 errors["base"] = error
             else:
@@ -117,17 +113,12 @@ class PlanetpodConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(
                     title="Planetpod",
-                    data=user_input,
+                    data={CONF_API_KEY: user_input[CONF_API_KEY]},
                 )
 
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema(
-                {
-                    vol.Optional(CONF_API_URL, default=DEFAULT_API_URL): str,
-                    vol.Required(CONF_API_KEY): str,
-                }
-            ),
+            data_schema=vol.Schema({vol.Required(CONF_API_KEY): str}),
             errors=errors,
         )
 
@@ -139,26 +130,19 @@ class PlanetpodConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         entry = self._get_reconfigure_entry()
 
         if user_input is not None:
-            grid_id, error = await _validate_connection(
-                self.hass,
-                user_input[CONF_API_URL],
-                user_input[CONF_API_KEY],
-            )
+            grid_id, error = await _validate_connection(self.hass, user_input[CONF_API_KEY])
             if error:
                 errors["base"] = error
             else:
                 await self.async_set_unique_id(f"planetpod_grid_{grid_id}")
                 self._abort_if_unique_id_mismatch()
-                return self.async_update_reload_and_abort(entry, data_updates=user_input)
+                return self.async_update_reload_and_abort(
+                    entry, data_updates={CONF_API_KEY: user_input[CONF_API_KEY]}
+                )
 
         return self.async_show_form(
             step_id="reconfigure",
-            data_schema=vol.Schema(
-                {
-                    vol.Optional(CONF_API_URL, default=entry.data.get(CONF_API_URL, DEFAULT_API_URL)): str,
-                    vol.Required(CONF_API_KEY): str,
-                }
-            ),
+            data_schema=vol.Schema({vol.Required(CONF_API_KEY): str}),
             errors=errors,
         )
 
@@ -174,27 +158,20 @@ class PlanetpodConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         entry = self._get_reauth_entry()
 
         if user_input is not None:
-            grid_id, error = await _validate_connection(
-                self.hass,
-                user_input[CONF_API_URL],
-                user_input[CONF_API_KEY],
-            )
+            grid_id, error = await _validate_connection(self.hass, user_input[CONF_API_KEY])
             if error:
                 errors["base"] = error
             else:
                 await self.async_set_unique_id(f"planetpod_grid_{grid_id}")
                 self._abort_if_unique_id_mismatch()
                 return self.async_update_reload_and_abort(
-                    entry, data_updates=user_input, reason="reauth_successful"
+                    entry,
+                    data_updates={CONF_API_KEY: user_input[CONF_API_KEY]},
+                    reason="reauth_successful",
                 )
 
         return self.async_show_form(
             step_id="reauth_confirm",
-            data_schema=vol.Schema(
-                {
-                    vol.Optional(CONF_API_URL, default=entry.data.get(CONF_API_URL, DEFAULT_API_URL)): str,
-                    vol.Required(CONF_API_KEY): str,
-                }
-            ),
+            data_schema=vol.Schema({vol.Required(CONF_API_KEY): str}),
             errors=errors,
         )

@@ -5,23 +5,19 @@
         "title": "Connect to Planetpod",
         "description": "Enter your Planetpod Open API credentials. You can generate a key in the Planetpod app under Settings → API.",
         "data": {
-          "api_url": "API URL",
           "api_key": "API Key"
         },
         "data_description": {
-          "api_url": "Base URL of the Planetpod API (leave default unless self-hosted)",
           "api_key": "Bearer token starting with pp_"
         }
       },
       "reconfigure": {
         "title": "Reconfigure Planetpod",
-        "description": "Update your Planetpod API credentials.",
+        "description": "Update your Planetpod API key.",
         "data": {
-          "api_url": "API URL",
           "api_key": "API Key"
         },
         "data_description": {
-          "api_url": "Base URL of the Planetpod API (leave default unless self-hosted)",
           "api_key": "Bearer token starting with pp_"
         }
       },
@@ -29,11 +25,9 @@
         "title": "Re-authenticate Planetpod",
         "description": "Your Planetpod API key has expired or been revoked. Please enter a new key to restore the integration.",
         "data": {
-          "api_url": "API URL",
           "api_key": "API Key"
         },
         "data_description": {
-          "api_url": "Base URL of the Planetpod API (leave default unless self-hosted)",
           "api_key": "New Bearer token starting with pp_"
         }
       }

@@ -4,7 +4,6 @@ from __future__ import annotations
 DOMAIN = "planetpod"
 MANUFACTURER = "Planetpod"
 
-CONF_API_URL = "api_url"
 CONF_API_KEY = "api_key"
 
 DEFAULT_API_URL = "https://api.planetpod.nl"

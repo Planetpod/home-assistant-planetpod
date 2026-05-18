@@ -12,7 +12,7 @@ def auto_enable_custom_integrations(enable_custom_integrations):
     """Enable loading of custom integrations for all tests."""
     return
 
-from custom_components.planetpod.const import CONF_API_KEY, CONF_API_URL, DEFAULT_API_URL, DOMAIN
+from custom_components.planetpod.const import CONF_API_KEY, DEFAULT_API_URL, DOMAIN
 
 MOCK_GRID_ID = 123
 MOCK_SERIAL = "POD-001"
@@ -69,7 +69,7 @@ def config_entry() -> MockConfigEntry:
     return MockConfigEntry(
         domain=DOMAIN,
         title="Planetpod",
-        data={CONF_API_URL: DEFAULT_API_URL, CONF_API_KEY: MOCK_API_KEY},
+        data={CONF_API_KEY: MOCK_API_KEY},
         unique_id=f"planetpod_grid_{MOCK_GRID_ID}",
     )
 

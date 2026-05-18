@@ -6,10 +6,10 @@ from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 
-from custom_components.planetpod.const import CONF_API_KEY, CONF_API_URL, DEFAULT_API_URL, DOMAIN
-from tests.conftest import MOCK_API_KEY, MOCK_API_URL, MOCK_GRID_ID
+from custom_components.planetpod.const import CONF_API_KEY, DOMAIN
+from tests.conftest import MOCK_API_KEY, MOCK_API_URL
 
-USER_INPUT = {CONF_API_URL: DEFAULT_API_URL, CONF_API_KEY: MOCK_API_KEY}
+USER_INPUT = {CONF_API_KEY: MOCK_API_KEY}
 
 
 async def _init_user_flow(hass: HomeAssistant):
@@ -30,7 +30,6 @@ async def test_user_success(hass: HomeAssistant, aioclient_mock, mock_grid_paylo
     result = await hass.config_entries.flow.async_configure(result["flow_id"], USER_INPUT)
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert result["data"][CONF_API_KEY] == MOCK_API_KEY
-    assert result["data"][CONF_API_URL] == DEFAULT_API_URL
 
 
 async def test_user_invalid_auth(hass: HomeAssistant, aioclient_mock):
@@ -92,7 +91,7 @@ async def test_reconfigure_success(hass: HomeAssistant, config_entry, aioclient_
         context={"source": "reconfigure", "entry_id": config_entry.entry_id},
     )
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_API_URL: DEFAULT_API_URL, CONF_API_KEY: "pp_newkey"}
+        result["flow_id"], {CONF_API_KEY: "pp_newkey"}
     )
     assert result["type"] == FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
@@ -131,7 +130,7 @@ async def test_reauth_confirm_success(hass: HomeAssistant, config_entry, aioclie
         data=config_entry.data,
     )
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_API_URL: DEFAULT_API_URL, CONF_API_KEY: "pp_newkey"}
+        result["flow_id"], {CONF_API_KEY: "pp_newkey"}
     )
     assert result["type"] == FlowResultType.ABORT
     assert result["reason"] == "reauth_successful"

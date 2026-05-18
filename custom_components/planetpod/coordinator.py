@@ -13,7 +13,7 @@ from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import CONF_API_KEY, CONF_API_URL, DEFAULT_SCAN_INTERVAL, DOMAIN
+from .const import CONF_API_KEY, DEFAULT_API_URL, DEFAULT_SCAN_INTERVAL, DOMAIN
 from .helpers import is_valid_grid_payload, read_json_payload
 
 _LOGGER = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ class PlanetpodDataUpdateCoordinator(DataUpdateCoordinator):
             update_interval=timedelta(seconds=DEFAULT_SCAN_INTERVAL),
         )
         self.entry = entry
-        self._api_url: str = entry.data[CONF_API_URL]
+        self._api_url: str = DEFAULT_API_URL
         self._api_key: str = entry.data[CONF_API_KEY]
 
     async def _async_update_data(self) -> dict:
