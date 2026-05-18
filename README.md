@@ -1,45 +1,72 @@
 # Home Assistant Planetpod Integration
 
-A Home Assistant integration for Planetpod devices.
+Monitor your Planetpod solar battery from Home Assistant. The integration connects via the Planetpod Open API (read-only).
+
+## Requirements
+
+- Home Assistant 2024.4.0 or later
+- A Planetpod account with an active battery
+- A Planetpod Open API token (generated in the app)
+
+## Generating an API token
+
+1. Open the Planetpod app
+2. Go to **Instellingen → Planetpod beheer**
+3. Scroll down to the **Open API** section
+4. Tap **Token aanmaken**
+5. Tap the copy button next to the token — it is only shown once
+6. The token starts with `pp_` and is valid for 1 year
+
+> Generating a new token revokes the previous one. If you rotate the token, Home Assistant will show a re-authentication banner — enter the new token there.
 
 ## Installation
 
 ### Via HACS (Recommended)
 
 1. Open HACS in Home Assistant
-2. Click on "Custom repositories"
-3. Add this repository: `https://github.com/marcospieras/home-assistant-planetpod`
-4. Click "Install"
-5. Restart Home Assistant
+2. Click **Custom repositories**
+3. Add `https://github.com/marcospieras/home-assistant-planetpod`
+4. Install **Planetpod** and restart Home Assistant
 
-### Manual Installation
+### Manual
 
-1. Clone this repository into `config/custom_components/`
-2. Restart Home Assistant
+Copy the `custom_components/planetpod` folder into your `config/custom_components/` directory and restart Home Assistant.
 
-## Configuration
+## Setup
 
-After installation, add the integration via Home Assistant UI:
+1. Go to **Settings → Devices & Services → Add Integration**
+2. Search for **Planetpod**
+3. Paste your `pp_` token and confirm
 
-1. Go to Settings → Devices & Services → Create Automation
-2. Select "Planetpod" from the list
-3. Enter your Planetpod API configuration:
-   - **API URL**: The endpoint URL (e.g., `https://api.example.com`)
-   - **API Key**: Your Planetpod Open API token (generated in the Planetpod app)
+## Sensors
 
-## Features
+One device is created per battery (identified by serial number). The following sensors are available:
 
-- Automatic discovery of Planetpod devices
-- Real-time status monitoring
-- Configurable polling interval
-- Full Home Assistant integration
+| Sensor | Unit |
+|---|---|
+| State of Charge | % |
+| State of Health | % |
+| Online status | — |
+| Charge status | — |
+| App mode | — |
+| Pod mode | — |
+| Deployed power | kW |
+| Requested power | kW |
+| Received by pod power | kW |
+| Max charge power | kW |
+| Max discharge power | kW |
+| Battery temperature | °C |
+| AC voltage | V |
+| WiFi signal strength | dBm |
+| Relay status | — |
+| Total cycles | — |
+| SoC upper limit | % |
+| SoC lower limit | % |
 
-## Requirements
+## Token expiry & re-authentication
 
-- Home Assistant 2023.12.0 or later
-- Planetpod device accessible from Home Assistant
+Tokens expire after 1 year by default. When a token expires or is revoked, Home Assistant will display a **Re-authenticate** banner on the integration. Tap it, enter a new token generated from the app, and the integration resumes automatically.
 
 ## Support
 
-For issues, questions, or contributions, please visit:
 https://github.com/marcospieras/home-assistant-planetpod
