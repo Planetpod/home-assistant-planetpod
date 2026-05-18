@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Mapping
 from typing import Any
 
 import aiohttp
@@ -92,6 +93,72 @@ class PlanetpodConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema(
                 {
                     vol.Optional(CONF_API_URL, default=DEFAULT_API_URL): str,
+                    vol.Required(CONF_API_KEY): str,
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle reconfiguration of existing entry."""
+        errors: dict[str, str] = {}
+        entry = self._get_reconfigure_entry()
+
+        if user_input is not None:
+            grid_id, error = await _validate_connection(
+                self.hass,
+                user_input[CONF_API_URL],
+                user_input[CONF_API_KEY],
+            )
+            if error:
+                errors["base"] = error
+            else:
+                await self.async_set_unique_id(f"planetpod_grid_{grid_id}")
+                self._abort_if_unique_id_mismatch()
+                return self.async_update_reload_and_abort(entry, data_updates=user_input)
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(CONF_API_URL, default=entry.data.get(CONF_API_URL, DEFAULT_API_URL)): str,
+                    vol.Required(CONF_API_KEY): str,
+                }
+            ),
+            errors=errors,
+        )
+
+    async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> FlowResult:
+        """Handle re-authentication triggered by a 401."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle the re-authentication form."""
+        errors: dict[str, str] = {}
+        entry = self._get_reauth_entry()
+
+        if user_input is not None:
+            grid_id, error = await _validate_connection(
+                self.hass,
+                user_input[CONF_API_URL],
+                user_input[CONF_API_KEY],
+            )
+            if error:
+                errors["base"] = error
+            else:
+                await self.async_set_unique_id(f"planetpod_grid_{grid_id}")
+                self._abort_if_unique_id_mismatch()
+                return self.async_update_reload_and_abort(entry, data_updates=user_input)
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema(
+                {
+                    vol.Optional(CONF_API_URL, default=entry.data.get(CONF_API_URL, DEFAULT_API_URL)): str,
                     vol.Required(CONF_API_KEY): str,
                 }
             ),

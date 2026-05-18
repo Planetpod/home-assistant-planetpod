@@ -9,6 +9,7 @@ from typing import Any
 import aiohttp
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -59,7 +60,7 @@ class PlanetpodDataUpdateCoordinator(DataUpdateCoordinator):
                 timeout=aiohttp.ClientTimeout(total=15),
             ) as resp:
                 if resp.status == 401:
-                    raise UpdateFailed("Invalid API key (401 Unauthorized)")
+                    raise ConfigEntryAuthFailed("API key expired or revoked")
                 if resp.status == 404:
                     payload = await read_json_payload(resp)
                     if _is_no_data_404(payload):
