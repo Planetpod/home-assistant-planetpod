@@ -28,7 +28,7 @@ from .coordinator import PlanetpodDataUpdateCoordinator
 _LOGGER = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
+@dataclass
 class PlanetpodSensorEntityDescription(SensorEntityDescription):
     """Describes a Planetpod sensor."""
 
