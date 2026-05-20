@@ -72,8 +72,7 @@
           "cash": "Cash",
           "solar": "Solar",
           "solarSmart": "Solar Smart",
-          "solarPure": "Solar Pure",
-          "open": "Open"
+          "solarPure": "Solar Pure"
         }
       },
       "pod_mode": {
