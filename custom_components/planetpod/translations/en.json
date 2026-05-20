@@ -109,8 +109,8 @@
       "relay_status": {
         "name": "Relay Status",
         "state": {
-          "ON": "On",
-          "OFF": "Off"
+          "on": "On",
+          "off": "Off"
         }
       },
       "total_cycles": {

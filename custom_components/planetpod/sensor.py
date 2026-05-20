@@ -21,6 +21,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import ATTR_ATTRIBUTION, DOMAIN, MANUFACTURER
 from .coordinator import PlanetpodDataUpdateCoordinator
@@ -149,8 +150,8 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
         name="Relay Status",
         translation_key="relay_status",
         device_class=SensorDeviceClass.ENUM,
-        options=["ON", "OFF"],
-        value_fn=lambda pod: pod["advanced"]["relay_status"],
+        options=["on", "off"],
+        value_fn=lambda pod: pod["advanced"]["relay_status"].lower(),
     ),
     PlanetpodSensorEntityDescription(
         key="total_cycles",
@@ -206,7 +207,7 @@ async def async_setup_entry(
     entry.async_on_unload(coordinator.async_add_listener(_add_new_pods))
 
 
-class PlanetpodSensor(SensorEntity):
+class PlanetpodSensor(CoordinatorEntity[PlanetpodDataUpdateCoordinator], SensorEntity):
     """Representation of a Planetpod sensor."""
 
     entity_description: PlanetpodSensorEntityDescription
@@ -221,8 +222,8 @@ class PlanetpodSensor(SensorEntity):
         serial_number: str,
     ) -> None:
         """Initialize the sensor."""
+        super().__init__(coordinator)
         self.entity_description = description
-        self.coordinator = coordinator
         self._serial = serial_number
         self._attr_unique_id = f"{entry.entry_id}_{serial_number}_{description.key}"
 
@@ -235,7 +236,7 @@ class PlanetpodSensor(SensorEntity):
             "identifiers": {(DOMAIN, self._serial)},
             "name": f"Planetpod {self._serial}",
             "manufacturer": MANUFACTURER,
-            "model": f"Capacity: {battery.get('capacity_total_kwh')} kWh",
+            "model": f"Capacity: {cap} kWh" if (cap := battery.get("capacity_total_kwh")) is not None else None,
             "sw_version": battery.get("scu_firmware_version"),
         }
 
@@ -253,12 +254,7 @@ class PlanetpodSensor(SensorEntity):
     @property
     def available(self) -> bool:
         """Return availability."""
-        return self.coordinator.last_update_success and self._get_pod() is not None
-
-    @property
-    def should_poll(self) -> bool:
-        """Return False, polling handled by coordinator."""
-        return False
+        return super().available and self._get_pod() is not None
 
     def _get_pod(self) -> dict | None:
         """Find this sensor's pod in coordinator data."""
@@ -269,9 +265,4 @@ class PlanetpodSensor(SensorEntity):
                 return pod
         return None
 
-    async def async_added_to_hass(self) -> None:
-        """When entity is added to hass."""
-        self.async_on_remove(
-            self.coordinator.async_add_listener(self.async_write_ha_state)
-        )
 
