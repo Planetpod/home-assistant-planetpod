@@ -66,38 +66,6 @@ class PlanetpodConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
-    # --- HA 2024.4+ compatibility helpers ---
-    # These methods exist natively in HA 2024.4+; we define them here so the
-    # integration also runs on older HA versions used in the test environment.
-
-    def _get_reconfigure_entry(self) -> config_entries.ConfigEntry:
-        return self.hass.config_entries.async_get_entry(self.context["entry_id"])  # type: ignore[return-value]
-
-    def _get_reauth_entry(self) -> config_entries.ConfigEntry:
-        return self.hass.config_entries.async_get_entry(self.context["entry_id"])  # type: ignore[return-value]
-
-    def async_update_reload_and_abort(
-        self,
-        entry: config_entries.ConfigEntry,
-        *,
-        data_updates: dict[str, Any] | None = None,
-        reason: str = "reconfigure_successful",
-        **_kwargs: Any,
-    ) -> FlowResult:
-        if data_updates:
-            self.hass.config_entries.async_update_entry(
-                entry, data={**entry.data, **data_updates}
-            )
-        self.hass.async_create_task(self.hass.config_entries.async_reload(entry.entry_id))
-        return self.async_abort(reason=reason)
-
-    def _abort_if_unique_id_mismatch(self) -> None:
-        entry = self.hass.config_entries.async_get_entry(self.context.get("entry_id", ""))
-        if entry and entry.unique_id != self.unique_id:
-            raise config_entries.data_entry_flow.AbortFlow("unique_id_mismatch")
-
-    # ----------------------------------------
-
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
