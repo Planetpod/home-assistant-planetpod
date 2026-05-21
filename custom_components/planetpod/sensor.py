@@ -151,7 +151,7 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
         translation_key="relay_status",
         device_class=SensorDeviceClass.ENUM,
         options=["on", "off"],
-        value_fn=lambda pod: pod["advanced"]["relay_status"].lower(),
+        value_fn=lambda pod: v.lower() if (v := pod["advanced"]["relay_status"]) is not None else None,
     ),
     PlanetpodSensorEntityDescription(
         key="total_cycles",
