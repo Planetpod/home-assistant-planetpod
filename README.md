@@ -63,6 +63,17 @@ One device is created per battery (identified by serial number). The following s
 | SoC upper limit | % |
 | SoC lower limit | % |
 
+## Sensors showing "Unknown"
+
+Some sensors may show **Unknown** until the hardware has operated for a period of time:
+
+| Sensor | Reason |
+|---|---|
+| **State of Health** | Populated after a battery calibration cycle |
+| **Total Cycles** | Populated after a battery calibration cycle |
+| **AC Voltage** | Reported by the BIC hardware module — null if BIC has not sent data yet |
+| **Received by Pod Power** | Only non-null when the pod is actively executing a power command — null at idle is expected |
+
 ## Token expiry & re-authentication
 
 Tokens expire after 1 year by default. When a token expires or is revoked, Home Assistant will display a **Re-authenticate** banner on the integration. Tap it, enter a new token generated from the app, and the integration resumes automatically.
