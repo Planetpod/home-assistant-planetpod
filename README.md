@@ -23,10 +23,18 @@ Monitor your Planetpod solar battery from Home Assistant. The integration connec
 
 ### Via HACS (Recommended)
 
+**Step 1 — Add the custom repository**
+
 1. Open HACS in Home Assistant
-2. Click **Custom repositories**
-3. Add `https://github.com/Planetpod/home-assistant-planetpod`
-4. Install **Planetpod** and restart Home Assistant
+2. Click the three-dot menu (⋮) in the top right and select **Custom repositories**
+3. Paste `https://github.com/Planetpod/home-assistant-planetpod` and set category to **Integration**
+4. Click **Add**
+
+**Step 2 — Download the integration**
+
+1. In HACS, search for **Planetpod**
+2. Click **Download** and confirm
+3. Restart Home Assistant
 
 
 ## Setup
