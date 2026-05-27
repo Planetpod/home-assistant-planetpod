@@ -65,8 +65,8 @@ One device is created per battery (identified by serial number). The following s
 | WiFi Signal Strength | dBm | Wireless signal quality of the pod's connection to the local network. | negative number, closer to 0 is stronger |
 | Relay Status | — | Whether the pod's internal 230 V relay is connected or disconnected. | `on`, `off` |
 | Total Cycles | — | Number of full charge/discharge cycles the battery has completed, counted by the BMS. | integer ≥ 0 |
-| SoC Upper Limit | % | Maximum charge level the pod will charge to, as configured in the app. | 0 – 100 |
-| SoC Lower Limit | % | Minimum charge level the pod will discharge to, as configured in the app. | 0 – 100 |
+| SoC Upper Limit | % | Maximum charge level the pod will charge to, as configured in the app. Defaults to 85% if not set. | 0 – 100 |
+| SoC Lower Limit | % | Minimum charge level the pod will discharge to, as configured in the app. Defaults to 20% if not set. | 0 – 100 |
 
 ## Sensors showing "Unknown"
 
