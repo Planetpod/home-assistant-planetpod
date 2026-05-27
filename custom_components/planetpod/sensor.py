@@ -96,7 +96,7 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
         native_unit_of_measurement=UnitOfPower.KILO_WATT,
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda pod: pod["power_control"]["received_by_pod_power_kw"],
+        value_fn=lambda pod: round(v, 3) if (v := pod["power_control"]["received_by_pod_power_kw"]) is not None else None,
     ),
     PlanetpodSensorEntityDescription(
         key="max_charge_power_kw",
@@ -157,7 +157,7 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
         key="total_cycles",
         name="Total Cycles",
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda pod: pod["battery"]["total_cycles"],
+        value_fn=lambda pod: int(v) if (v := pod["battery"]["total_cycles"]) is not None else None,
     ),
     PlanetpodSensorEntityDescription(
         key="soc_upper_limit_pct",
