@@ -1,6 +1,6 @@
 # Home Assistant Planetpod Integration
 
-Monitor your Planetpod solar battery from Home Assistant. The integration connects via the Planetpod Open API (read-only).
+Monitor your Planetpod solar battery from Home Assistant. The integration polls the Planetpod cloud API every 60 seconds — sensor data is routed through Planetpod's servers, not read directly from the hardware on your local network.
 
 ## Requirements
 
@@ -47,26 +47,26 @@ Monitor your Planetpod solar battery from Home Assistant. The integration connec
 
 One device is created per battery (identified by serial number). The following sensors are available:
 
-| Sensor | Unit |
-|---|---|
-| State of Charge | % |
-| State of Health | % |
-| Online status | — |
-| Charge status | — |
-| App mode | — |
-| Pod mode | — |
-| Deployed power | kW |
-| Requested power | kW |
-| Received by pod power | kW |
-| Max charge power | kW |
-| Max discharge power | kW |
-| Battery temperature | °C |
-| AC voltage | V |
-| WiFi signal strength | dBm |
-| Relay status | — |
-| Total cycles | — |
-| SoC upper limit | % |
-| SoC lower limit | % |
+| Sensor | Unit | Description | Possible values |
+|---|---|---|---|
+| State of Charge | % | Current battery charge level as a percentage of total capacity. | 0 – 100 |
+| State of Health | % | Battery degradation indicator — 100% is new, lower values indicate reduced capacity over time. | 0 – 100 |
+| Online | — | Whether the pod sent a message to the server in the last 60 seconds. | `online`, `offline` |
+| Charge Status | — | Current direction of energy flow reported by the pod. | `charge`, `discharge`, `idle` |
+| App Mode | — | Active control strategy set in the Planetpod app. | `cash`, `solar`, `solarSmart`, `solarPure` |
+| Pod Mode | — | Internal operating state reported by the pod firmware. | `cash`, `solar`, `solarSmart`, `solarPure`, `standby`, `shortStandby`, `locked`, `calibration`, `cell_health_protect`, `solarSmartSpeed`, `solarSmartBalance`, `developer`, `factorycheck`, `unknown` |
+| Deployed Power | kW | Actual AC power the pod is delivering to or absorbing from the grid right now. | positive = discharging to grid, negative = charging from grid |
+| Requested Power | kW | Power setpoint scheduled for the current minute by the Planetpod server. | positive = discharge request, negative = charge request |
+| Received by Pod Power | kW | Power setpoint the pod's BIC module received and is executing — `null` when no active command. | positive = discharge, negative = charge, `null` at idle |
+| Max Charge Power | kW | Maximum charge power ceiling sent to the BIC — reduced to 1.484 kW when sound mode is active. | `3.0` normally, `1.484` in sound mode |
+| Max Discharge Power | kW | Maximum discharge power ceiling — mirrors max charge power with opposite sign. | `-3.0` normally, `-1.484` in sound mode |
+| Battery Temperature | °C | Average internal cell temperature measured by the BMS. | numeric |
+| AC Voltage | V | Average of both BIC module AC voltage readings — `null` if BIC has not reported yet. | typically ~230 V |
+| WiFi Signal Strength | dBm | Wireless signal quality of the pod's connection to the local network. | negative number, closer to 0 is stronger |
+| Relay Status | — | Whether the pod's internal 230 V relay is connected or disconnected. | `on`, `off` |
+| Total Cycles | — | Number of full charge/discharge cycles the battery has completed, counted by the BMS. | integer ≥ 0 |
+| SoC Upper Limit | % | Maximum charge level the pod will charge to, as configured in the app. | 0 – 100 |
+| SoC Lower Limit | % | Minimum charge level the pod will discharge to, as configured in the app. | 0 – 100 |
 
 ## Sensors showing "Unknown"
 
