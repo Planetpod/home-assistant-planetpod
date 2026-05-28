@@ -85,7 +85,7 @@
         "name": "Requested Power"
       },
       "received_by_pod_power_kw": {
-        "name": "Received by Pod Power"
+        "name": "Requested Power Received by Pod"
       },
       "max_charge_power_kw": {
         "name": "Max Charge Power"
@@ -108,8 +108,8 @@
       "relay_status": {
         "name": "Relay Status",
         "state": {
-          "on": "On",
-          "off": "Off"
+          "230_ON": "On",
+          "230_OFF": "Off"
         }
       },
       "total_cycles": {

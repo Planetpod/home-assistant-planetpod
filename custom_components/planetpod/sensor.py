@@ -92,7 +92,7 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
     ),
     PlanetpodSensorEntityDescription(
         key="received_by_pod_power_kw",
-        name="Received by Pod Power",
+        name="Requested Power Received by Pod",
         native_unit_of_measurement=UnitOfPower.KILO_WATT,
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,
@@ -150,8 +150,8 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
         name="Relay Status",
         translation_key="relay_status",
         device_class=SensorDeviceClass.ENUM,
-        options=["on", "off"],
-        value_fn=lambda pod: v.lower() if (v := pod["advanced"]["relay_status"]) is not None else None,
+        options=["230_ON", "230_OFF"],
+        value_fn=lambda pod: pod["advanced"]["relay_status"],
     ),
     PlanetpodSensorEntityDescription(
         key="total_cycles",

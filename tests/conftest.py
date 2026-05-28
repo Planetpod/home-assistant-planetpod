@@ -56,7 +56,7 @@ def mock_grid_payload() -> dict[str, Any]:
                     "avg_battery_temp_c": 22.5,
                     "wifi_rssi_dbm": -55,
                     "avg_ac_voltage_v": 230,
-                    "relay_status": "ON",
+                    "relay_status": "230_ON",
                 },
             }
         ],
