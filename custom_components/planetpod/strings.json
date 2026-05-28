@@ -108,8 +108,8 @@
       "relay_status": {
         "name": "Relay Status",
         "state": {
-          "230_ON": "On",
-          "230_OFF": "Off"
+          "230_ON": "230_ON",
+          "230_OFF": "230_OFF"
         }
       },
       "total_cycles": {
