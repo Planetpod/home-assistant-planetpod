@@ -1,0 +1,28 @@
+{
+  "name": "home-assistant-planetpod",
+  "version": "1.0.0",
+  "description": "Monitor your Planetpod solar battery from Home Assistant. The integration polls the Planetpod cloud API every 60 seconds — sensor data is routed through Planetpod's servers, not read directly from the hardware on your local network.",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Planetpod/home-assistant-planetpod.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Planetpod/home-assistant-planetpod/issues"
+  },
+  "homepage": "https://github.com/Planetpod/home-assistant-planetpod#readme",
+  "devDependencies": {
+    "@commitlint/cli": "^21.1.0",
+    "@commitlint/config-conventional": "^21.1.0",
+    "lefthook": "^2.1.9"
+  }
+}
