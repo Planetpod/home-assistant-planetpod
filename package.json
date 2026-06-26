@@ -1,0 +1,12 @@
+{
+  "name": "home-assistant-planetpod",
+  "version": "1.0.0",
+  "scripts": {
+    "test": "pytest tests/"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^19.0.0",
+    "@commitlint/config-conventional": "^19.0.0",
+    "lefthook": "^2.1.9"
+  }
+}
