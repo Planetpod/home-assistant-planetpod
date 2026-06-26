@@ -66,6 +66,32 @@ class PlanetpodConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
+    # Compatibility shims for HA < 2024.x
+    def _get_reconfigure_entry(self) -> config_entries.ConfigEntry:
+        return self.hass.config_entries.async_get_entry(self.context["entry_id"])
+
+    def _get_reauth_entry(self) -> config_entries.ConfigEntry:
+        return self.hass.config_entries.async_get_entry(self.context["entry_id"])
+
+    def _abort_if_unique_id_mismatch(self) -> None:
+        entry = self.hass.config_entries.async_get_entry(self.context["entry_id"])
+        if entry and entry.unique_id != self.unique_id:
+            raise config_entries.data_entry_flow.AbortFlow("unique_id_mismatch")
+
+    async def async_update_reload_and_abort(
+        self,
+        entry: config_entries.ConfigEntry,
+        *,
+        data_updates: dict[str, Any] | None = None,
+        reason: str = "reconfigure_successful",
+    ) -> config_entries.data_entry_flow.FlowResult:
+        if data_updates:
+            self.hass.config_entries.async_update_entry(
+                entry, data={**entry.data, **data_updates}
+            )
+        await self.hass.config_entries.async_reload(entry.entry_id)
+        return self.async_abort(reason=reason)
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
@@ -104,7 +130,7 @@ class PlanetpodConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 await self.async_set_unique_id(f"planetpod_grid_{grid_id}")
                 self._abort_if_unique_id_mismatch()
-                return self.async_update_reload_and_abort(
+                return await self.async_update_reload_and_abort(
                     entry, data_updates={CONF_API_KEY: user_input[CONF_API_KEY]}
                 )
 
@@ -132,7 +158,7 @@ class PlanetpodConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 await self.async_set_unique_id(f"planetpod_grid_{grid_id}")
                 self._abort_if_unique_id_mismatch()
-                return self.async_update_reload_and_abort(
+                return await self.async_update_reload_and_abort(
                     entry,
                     data_updates={CONF_API_KEY: user_input[CONF_API_KEY]},
                     reason="reauth_successful",
