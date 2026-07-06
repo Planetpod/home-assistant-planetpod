@@ -19,9 +19,7 @@ Monitor your Planetpod solar battery from Home Assistant. The integration polls 
 
 > Generating a new token revokes the previous one. If you rotate the token, Home Assistant will show a re-authentication banner — enter the new token there.
 
-## Installation
-
-### Via HACS (Recommended)
+## Step 1: Via HACS (Recommended)
 
 Click the button below to add the repository to HACS on your Home Assistant instance:
 
@@ -40,7 +38,7 @@ Then in HACS, click **Download**, confirm, and restart Home Assistant.
 
 </details>
 
-## Setup
+## Step 2: Setup
 
 [![Open your Home Assistant instance and start setting up the Planetpod integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=planetpod)
 
