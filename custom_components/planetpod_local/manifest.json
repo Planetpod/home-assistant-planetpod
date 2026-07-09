@@ -1,0 +1,12 @@
+{
+  "domain": "planetpod_local",
+  "name": "Planetpod",
+  "codeowners": ["@marcospieras"],
+  "config_flow": true,
+  "documentation": "https://github.com/marcospieras/home-assistant-planetpod",
+  "requirements": [],
+  "homeassistant": "2024.4.0",
+  "iot_class": "local_push",
+  "version": "0.1.0",
+  "issue_tracker": "https://github.com/marcospieras/home-assistant-planetpod/issues"
+}
