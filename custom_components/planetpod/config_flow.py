@@ -100,9 +100,6 @@ class PlanetpodConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
 
-    def __init__(self) -> None:
-        self._local_options: dict[str, Any] = {}
-
     # Compatibility shims for HA < 2024.x
     def _get_reconfigure_entry(self) -> config_entries.ConfigEntry:
         return self.hass.config_entries.async_get_entry(self.context["entry_id"])
@@ -137,7 +134,7 @@ class PlanetpodConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle the initial step: how does your Planetpod connect."""
         if user_input is not None:
             if user_input[CONF_CONNECTION_TYPE] == CONNECTION_TYPE_LOCAL:
-                return await self.async_step_local_g1()
+                return await self.async_step_local_connect()
             return await self.async_step_cloud()
 
         return self.async_show_form(
@@ -236,25 +233,47 @@ class PlanetpodConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     # --- Local path -------------------------------------------------------
 
+    async def async_step_local_connect(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Wait for at least one real pod connection before asking anything else."""
+        await self.async_set_unique_id("planetpod_local")
+        self._abort_if_unique_id_configured()
+
+        pending: dict[str, Any] = self.hass.data.get(DOMAIN, {}).get(PENDING_PODS_KEY, {})
+
+        if pending:
+            return await self.async_step_local_g1()
+
+        return self.async_show_form(
+            step_id="local_connect",
+            data_schema=vol.Schema({}),
+            description_placeholders={"ha_address": _ha_address(self.hass)},
+        )
+
     async def async_step_local_g1(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Ask which G1 reading Balance mode should use, if a candidate exists."""
-        await self.async_set_unique_id("planetpod_local")
-        self._abort_if_unique_id_configured()
-
         candidate = _find_g1_candidate(self.hass)
 
         if candidate is None:
-            self._local_options = {CONF_G1_SOURCE: G1_SOURCE_POD}
-            return await self.async_step_local_connect()
+            return self.async_create_entry(
+                title="Planetpod",
+                data={CONF_CONNECTION_TYPE: CONNECTION_TYPE_LOCAL},
+                options={CONF_G1_SOURCE: G1_SOURCE_POD},
+            )
 
         if user_input is not None:
-            self._local_options = {CONF_G1_SOURCE: G1_SOURCE_POD}
+            options: dict[str, Any] = {CONF_G1_SOURCE: G1_SOURCE_POD}
             if user_input["g1_choice"] == candidate:
-                self._local_options[CONF_G1_SOURCE] = G1_SOURCE_HA_SENSOR
-                self._local_options[CONF_G1_HA_ENTITY_ID] = candidate
-            return await self.async_step_local_connect()
+                options[CONF_G1_SOURCE] = G1_SOURCE_HA_SENSOR
+                options[CONF_G1_HA_ENTITY_ID] = candidate
+            return self.async_create_entry(
+                title="Planetpod",
+                data={CONF_CONNECTION_TYPE: CONNECTION_TYPE_LOCAL},
+                options=options,
+            )
 
         return self.async_show_form(
             step_id="local_g1",
@@ -269,23 +288,4 @@ class PlanetpodConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     ),
                 }
             ),
-        )
-
-    async def async_step_local_connect(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Wait for at least one real pod connection before finishing setup."""
-        pending: dict[str, Any] = self.hass.data.get(DOMAIN, {}).get(PENDING_PODS_KEY, {})
-
-        if pending:
-            return self.async_create_entry(
-                title="Planetpod",
-                data={CONF_CONNECTION_TYPE: CONNECTION_TYPE_LOCAL},
-                options=self._local_options,
-            )
-
-        return self.async_show_form(
-            step_id="local_connect",
-            data_schema=vol.Schema({}),
-            description_placeholders={"ha_address": _ha_address(self.hass)},
         )
