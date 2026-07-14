@@ -17,6 +17,11 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from .const import (
     CONF_G1_HA_ENTITY_ID,
     CONF_G1_SOURCE,
+    CONF_MODE,
+    CONF_SOC_LOWER_LIMIT,
+    CONF_SOC_UPPER_LIMIT,
+    CONF_SOUND_MODE,
+    DEFAULT_MODE,
     DEFAULT_SOC_LOWER_LIMIT,
     DEFAULT_SOC_UPPER_LIMIT,
     DEFAULT_SOUND_MODE,
@@ -38,20 +43,27 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
         self._raw_payloads: dict[str, dict[str, Any]] = {}
         self._last_message_at: dict[str, datetime] = {}
         self._last_requested_power_kw: dict[str, float] = {}
-        self.mode: str = "balance"
         self.async_set_updated_data({"pods": []})
 
     @property
+    def mode(self) -> str:
+        return self.entry.options.get(CONF_MODE, DEFAULT_MODE)
+
+    @property
     def soc_upper_limit_pct(self) -> float:
-        return self.entry.options.get("soc_upper_limit_pct", DEFAULT_SOC_UPPER_LIMIT)
+        return self.entry.options.get(CONF_SOC_UPPER_LIMIT, DEFAULT_SOC_UPPER_LIMIT)
 
     @property
     def soc_lower_limit_pct(self) -> float:
-        return self.entry.options.get("soc_lower_limit_pct", DEFAULT_SOC_LOWER_LIMIT)
+        return self.entry.options.get(CONF_SOC_LOWER_LIMIT, DEFAULT_SOC_LOWER_LIMIT)
 
     @property
     def sound_mode(self) -> bool:
-        return self.entry.options.get("sound_mode", DEFAULT_SOUND_MODE)
+        return self.entry.options.get(CONF_SOUND_MODE, DEFAULT_SOUND_MODE)
+
+    def async_options_updated(self) -> None:
+        """Recompute pod status after an option (SoC limits, sound mode, ...) changes."""
+        self._rebuild()
 
     def ingest_post(self, serial: str, payload: dict[str, Any]) -> None:
         """Handle a POST /planetpod payload from one pod."""

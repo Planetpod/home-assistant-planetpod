@@ -32,31 +32,38 @@ class PlanetpodLocalView(HomeAssistantView):
 
     async def post(self, request: web.Request) -> web.Response:
         hass: HomeAssistant = request.app["hass"]
+        _LOGGER.warning("PLANETPOD: POST /planetpod received from %s", request.remote)
 
         try:
             payload = await request.json()
         except ValueError:
+            _LOGGER.warning("PLANETPOD: POST /planetpod invalid JSON")
             return web.Response(status=400, text="Invalid JSON")
 
         if not isinstance(payload, dict):
+            _LOGGER.warning("PLANETPOD: POST /planetpod payload is not a JSON object")
             return web.Response(status=400, text="Invalid payload")
 
         serial = (payload.get("systemInfo") or {}).get("podSerialNumber")
         if not serial:
-            _LOGGER.warning("POST /planetpod missing systemInfo.podSerialNumber")
+            _LOGGER.warning("PLANETPOD: POST /planetpod missing systemInfo.podSerialNumber")
             return web.Response(status=400, text="Missing systemInfo.podSerialNumber")
 
         coordinator = _get_any_coordinator(hass)
         if coordinator is not None:
+            _LOGGER.warning("PLANETPOD: POST /planetpod ingested by coordinator, serial=%s", serial)
             coordinator.ingest_post(serial, payload)
         else:
+            _LOGGER.warning("PLANETPOD: POST /planetpod buffered as pending, serial=%s (no coordinator yet)", serial)
             hass.data.setdefault(DOMAIN, {}).setdefault(PENDING_PODS_KEY, {})[serial] = payload
         return web.Response(status=200, text="success")
 
     async def get(self, request: web.Request) -> web.Response:
         hass: HomeAssistant = request.app["hass"]
+        _LOGGER.warning("PLANETPOD: GET /planetpod received from %s, query=%s", request.remote, dict(request.query))
         coordinator = _get_any_coordinator(hass)
         if coordinator is None:
+            _LOGGER.warning("PLANETPOD: GET /planetpod -- no coordinator set up yet (503)")
             return web.Response(status=503, text="Planetpod Local not configured")
 
         serial = request.query.get(QUERY_PARAM_SERIAL)
