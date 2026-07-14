@@ -8,8 +8,10 @@ coordinator's data dict alone.
 """
 from __future__ import annotations
 
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from homeassistant import config_entries
@@ -196,3 +198,49 @@ async def test_balance_source_sensor_reflects_g1_config(hass: HomeAssistant):
     select_state = hass.states.get("select.planetpod_pp_001_mode")
     assert number_state is not None
     assert select_state is not None
+
+
+async def test_command_buttons_are_config_category(hass: HomeAssistant):
+    """Regression test: command buttons must be entity_category=CONFIG so
+    they land in the device page's "Configuration" section, separate from
+    Mode/SoC limits in "Controls" -- otherwise HA alphabetizes everything
+    together, mixing "Calibration" in between "Mode" and the SoC sliders.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Planetpod",
+        data={CONF_CONNECTION_TYPE: CONNECTION_TYPE_LOCAL},
+        options={},
+        unique_id="planetpod_local",
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    registry = er.async_get(hass)
+
+    for entity_id in (
+        "button.planetpod_pp_001_reboot",
+        "button.planetpod_pp_001_calibration",
+        "button.planetpod_pp_001_turn_off_bms",
+        "button.planetpod_pp_001_unlock_scu",
+        "button.planetpod_pp_001_debug",
+        "button.planetpod_pp_001_standby",
+    ):
+        entry_reg = registry.async_get(entity_id)
+        assert entry_reg is not None, f"{entity_id} not found"
+        assert entry_reg.entity_category == EntityCategory.CONFIG
+
+    # Mode/SoC must stay in the primary Controls section (no category).
+    for entity_id in (
+        "select.planetpod_pp_001_mode",
+        "number.planetpod_pp_001_soc_upper_limit",
+        "number.planetpod_pp_001_soc_lower_limit",
+    ):
+        entry_reg = registry.async_get(entity_id)
+        assert entry_reg is not None, f"{entity_id} not found"
+        assert entry_reg.entity_category is None

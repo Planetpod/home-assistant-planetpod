@@ -12,6 +12,7 @@ from typing import Any
 
 from homeassistant.components.button import ButtonEntity, ButtonEntityDescription
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -27,17 +28,38 @@ class PlanetpodButtonEntityDescription(ButtonEntityDescription):
     command: str = ""
 
 
+# entity_category=CONFIG puts these in the device page's "Configuration"
+# section, separate from Mode/SoC limits in the primary "Controls" section --
+# otherwise HA's device page just alphabetizes everything together, mixing
+# "Calibration" in between "Mode" and the SoC sliders.
 BUTTON_DESCRIPTIONS: tuple[PlanetpodButtonEntityDescription, ...] = (
-    PlanetpodButtonEntityDescription(key="reboot", name="Reboot", command="reboot"),
     PlanetpodButtonEntityDescription(
-        key="toggle_calibration", name="Calibration", command="toggle_calibration"
+        key="reboot", name="Reboot", command="reboot", entity_category=EntityCategory.CONFIG
     ),
     PlanetpodButtonEntityDescription(
-        key="turn_off_bms", name="Turn Off BMS", command="turn_off_bms"
+        key="toggle_calibration",
+        name="Calibration",
+        command="toggle_calibration",
+        entity_category=EntityCategory.CONFIG,
     ),
-    PlanetpodButtonEntityDescription(key="unlock_scu", name="Unlock SCU", command="unlock_scu"),
-    PlanetpodButtonEntityDescription(key="debug_on", name="Debug", command="debug_on"),
-    PlanetpodButtonEntityDescription(key="standby", name="Standby", command="standby"),
+    PlanetpodButtonEntityDescription(
+        key="turn_off_bms",
+        name="Turn Off BMS",
+        command="turn_off_bms",
+        entity_category=EntityCategory.CONFIG,
+    ),
+    PlanetpodButtonEntityDescription(
+        key="unlock_scu",
+        name="Unlock SCU",
+        command="unlock_scu",
+        entity_category=EntityCategory.CONFIG,
+    ),
+    PlanetpodButtonEntityDescription(
+        key="debug_on", name="Debug", command="debug_on", entity_category=EntityCategory.CONFIG
+    ),
+    PlanetpodButtonEntityDescription(
+        key="standby", name="Standby", command="standby", entity_category=EntityCategory.CONFIG
+    ),
 )
 
 
