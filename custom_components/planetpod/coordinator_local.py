@@ -125,8 +125,24 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
             # solarPure) with a fixed ENUM sensor schema -- Balance/Speed is
             # a different concept, exposed separately via the Mode select
             # entity (select.py), not this field.
+            g1_delivered, g1_returned = self._resolve_g1(serial)
+            status["balance"] = {
+                "source_label": self._g1_source_label(),
+                "power_delivered_kw": g1_delivered,
+                "power_returned_kw": g1_returned,
+            }
             pods.append(status)
         self.async_set_updated_data({"pods": pods})
+
+    def _g1_source_label(self) -> str:
+        """Human-readable label for whichever G1 source Balance mode is using."""
+        if self.entry.options.get(CONF_G1_SOURCE) == G1_SOURCE_HA_SENSOR:
+            entity_id = self.entry.options.get(CONF_G1_HA_ENTITY_ID)
+            state = self.hass.states.get(entity_id) if entity_id else None
+            if state is not None:
+                return state.attributes.get("friendly_name", entity_id)
+            return entity_id or "Home Assistant sensor (unavailable)"
+        return "Pod-reported"
 
     def known_serials(self) -> set[str]:
         return set(self._raw_payloads.keys())

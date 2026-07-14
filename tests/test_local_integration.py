@@ -147,3 +147,52 @@ async def test_command_button_sets_one_shot_flag_on_next_get(hass: HomeAssistant
 
     second = coordinator.get_response_for("PP-001")
     assert "Reboot" not in second
+
+
+async def test_balance_source_sensor_reflects_g1_config(hass: HomeAssistant):
+    """The Balance Source sensor (and the shared SoC/Mode controls) must be
+    attached to the pod's own device, and reflect pod-reported vs. an HA
+    sensor correctly.
+    """
+    hass.states.async_set("sensor.my_p1_meter", "1.5", {"friendly_name": "My P1 Meter"})
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Planetpod",
+        data={CONF_CONNECTION_TYPE: CONNECTION_TYPE_LOCAL},
+        options={},
+        unique_id="planetpod_local",
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.planetpod_pp_001_balance_source")
+    assert state is not None
+    assert state.state == "Pod-reported"
+
+    hass.config_entries.async_update_entry(
+        entry,
+        options={
+            "g1_source": "ha_sensor",
+            "g1_ha_entity_id": "sensor.my_p1_meter",
+        },
+    )
+    coordinator.async_options_updated()
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.planetpod_pp_001_balance_source")
+    assert state.state == "My P1 Meter"
+
+    delivered = hass.states.get("sensor.planetpod_pp_001_balance_g1_power_delivered")
+    assert float(delivered.state) == 1.5
+
+    # SoC/Mode controls must be on the pod's own device, not a separate one.
+    number_state = hass.states.get("number.planetpod_pp_001_soc_upper_limit")
+    select_state = hass.states.get("select.planetpod_pp_001_mode")
+    assert number_state is not None
+    assert select_state is not None
