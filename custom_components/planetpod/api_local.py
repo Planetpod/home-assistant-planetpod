@@ -13,6 +13,33 @@ from .coordinator_local import PlanetpodLocalCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
+_VIEW_REGISTERED_KEY = "_local_view_registered"
+
+
+def ensure_local_view_registered(hass: HomeAssistant) -> None:
+    """Register the /planetpod HTTP view exactly once, whenever first called.
+
+    IMPORTANT: async_setup() only runs at boot if a config entry already
+    exists (or the domain is in configuration.yaml) -- starting a config
+    flow does NOT trigger it (verified against homeassistant.config_entries
+    ._load_integration, which only loads config_flow.py and dependencies).
+    So this must also be called from the config flow itself, not only from
+    async_setup(), or the view never exists for a brand-new install.
+    """
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN].setdefault(PENDING_PODS_KEY, {})
+
+    if hass.data[DOMAIN].get(_VIEW_REGISTERED_KEY):
+        return
+
+    if hass.http is None:
+        _LOGGER.warning("PLANETPOD: hass.http is None -- local mode connections will NOT work")
+        return
+
+    hass.http.register_view(PlanetpodLocalView())
+    hass.data[DOMAIN][_VIEW_REGISTERED_KEY] = True
+    _LOGGER.warning("PLANETPOD: HTTP view registered at /planetpod")
+
 
 def _get_any_coordinator(hass: HomeAssistant) -> PlanetpodLocalCoordinator | None:
     for key, value in hass.data.get(DOMAIN, {}).items():

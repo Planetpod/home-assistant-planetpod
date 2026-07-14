@@ -8,7 +8,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
-from .api_local import PlanetpodLocalView
+from .api_local import ensure_local_view_registered
 from .const import CONF_CONNECTION_TYPE, CONNECTION_TYPE_LOCAL, DOMAIN, PENDING_PODS_KEY
 from .coordinator import PlanetpodDataUpdateCoordinator
 from .coordinator_local import PlanetpodLocalCoordinator
@@ -19,16 +19,15 @@ PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.NUMBER, Platform.SELECT]
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Register the pod-facing local HTTP view once, independent of any config entry."""
-    _LOGGER.warning("PLANETPOD: async_setup() starting")
-    hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN].setdefault(PENDING_PODS_KEY, {})
+    """Register the pod-facing local HTTP view.
 
-    if hass.http is not None:
-        hass.http.register_view(PlanetpodLocalView())
-        _LOGGER.warning("PLANETPOD: HTTP view registered at /planetpod")
-    else:
-        _LOGGER.warning("PLANETPOD: hass.http is None -- local mode connections will NOT work")
+    NOTE: this only runs at boot if a config entry already exists (or the
+    domain is in configuration.yaml) -- it does NOT run just because someone
+    opens the config flow. ensure_local_view_registered() is also called
+    from config_flow.py to cover a brand-new install with no entry yet.
+    """
+    _LOGGER.warning("PLANETPOD: async_setup() starting")
+    ensure_local_view_registered(hass)
     return True
 
 

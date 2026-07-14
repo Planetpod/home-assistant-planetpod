@@ -14,6 +14,7 @@ from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from .api_local import ensure_local_view_registered
 from .const import (
     CONF_API_KEY,
     CONF_CONNECTION_TYPE,
@@ -239,6 +240,11 @@ class PlanetpodConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Wait for at least one real pod connection before asking anything else."""
         await self.async_set_unique_id("planetpod_local")
         self._abort_if_unique_id_configured()
+
+        # async_setup() only runs at boot if a config entry already exists --
+        # for a brand-new install there isn't one yet, so the HTTP view must
+        # be registered here too, the first time this step actually runs.
+        ensure_local_view_registered(self.hass)
 
         pending: dict[str, Any] = self.hass.data.get(DOMAIN, {}).get(PENDING_PODS_KEY, {})
 
