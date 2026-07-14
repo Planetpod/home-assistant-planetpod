@@ -40,6 +40,13 @@
           "api_key": "Bearer token starting with pp_"
         }
       },
+      "reconfigure_local": {
+        "title": "Reconfigure Planetpod",
+        "description": "Which grid meter reading should Balance mode use?",
+        "data": {
+          "g1_choice": "G1 source"
+        }
+      },
       "reauth_confirm": {
         "title": "Re-authenticate Planetpod",
         "description": "Your Planetpod API key has expired or been revoked. Please enter a new key to restore the integration.",
@@ -62,7 +69,8 @@
     "abort": {
       "already_configured": "This Planetpod grid is already configured.",
       "reauth_successful": "Re-authentication was successful.",
-      "reconfigure_successful": "Reconfiguration was successful."
+      "reconfigure_successful": "Reconfiguration was successful.",
+      "no_g1_candidate_to_reconfigure": "No compatible grid meter sensor was found -- nothing to reconfigure. Balance mode is using the pod-reported G1 value."
     }
   },
   "entity": {

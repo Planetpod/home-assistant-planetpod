@@ -182,8 +182,12 @@ class PlanetpodConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Handle reconfiguration of existing entry."""
-        errors: dict[str, str] = {}
         entry = self._get_reconfigure_entry()
+
+        if entry.data.get(CONF_CONNECTION_TYPE) == CONNECTION_TYPE_LOCAL:
+            return await self.async_step_reconfigure_local()
+
+        errors: dict[str, str] = {}
 
         if user_input is not None:
             grid_id, error = await _validate_connection(self.hass, user_input[CONF_API_KEY])
@@ -200,6 +204,45 @@ class PlanetpodConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="reconfigure",
             data_schema=vol.Schema({vol.Required(CONF_API_KEY): str}),
             errors=errors,
+        )
+
+    async def async_step_reconfigure_local(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle reconfiguration of a local-mode entry: change the G1 source."""
+        entry = self._get_reconfigure_entry()
+        candidate = _find_g1_candidate(self.hass)
+
+        if user_input is not None:
+            options: dict[str, Any] = {CONF_G1_SOURCE: G1_SOURCE_POD}
+            if candidate and user_input.get("g1_choice") == candidate:
+                options[CONF_G1_SOURCE] = G1_SOURCE_HA_SENSOR
+                options[CONF_G1_HA_ENTITY_ID] = candidate
+            self.hass.config_entries.async_update_entry(entry, options=options)
+            return await self.async_update_reload_and_abort(entry)
+
+        if candidate is None:
+            return self.async_abort(reason="no_g1_candidate_to_reconfigure")
+
+        return self.async_show_form(
+            step_id="reconfigure_local",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        "g1_choice",
+                        default=(
+                            candidate
+                            if entry.options.get(CONF_G1_SOURCE) == G1_SOURCE_HA_SENSOR
+                            else G1_SOURCE_POD
+                        ),
+                    ): vol.In(
+                        {
+                            G1_SOURCE_POD: "Pod-reported",
+                            candidate: candidate,
+                        }
+                    ),
+                }
+            ),
         )
 
     async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> FlowResult:
