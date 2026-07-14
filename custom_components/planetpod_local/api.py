@@ -1,13 +1,4 @@
-"""HTTP views implementing the pod-facing GET/POST /planetpod contract.
-
-These serve the same `/planetpod` path and payload shapes the pod already
-speaks to the cloud (api-spec/endpoints/planetpod/openapi.yaml), so the main
-firmware-side change needed is repointing the base URL locally. Firmware also
-needs to skip sending its Authorization header for local targets, and attach
-the pod's serial number to the GET request (today only POST carries it, via
-systemInfo.podSerialNumber) -- this view expects that as a `?serial=` query
-param, an interim convention still pending confirmation with firmware.
-"""
+"""HTTP views implementing the pod-facing GET/POST /planetpod contract."""
 from __future__ import annotations
 
 import logging
@@ -24,12 +15,6 @@ _LOGGER = logging.getLogger(__name__)
 
 
 def _get_any_coordinator(hass: HomeAssistant) -> PlanetpodLocalCoordinator | None:
-    """Return a coordinator to handle this request.
-
-    NOTE: only single-install setups are supported for now -- with multiple
-    config entries this just picks the first one. Fine for the current
-    testing phase; revisit if/when multi-install-per-HA-instance is needed.
-    """
     for key, value in hass.data.get(DOMAIN, {}).items():
         if key == PENDING_PODS_KEY:
             continue
@@ -42,7 +27,7 @@ class PlanetpodLocalView(HomeAssistantView):
 
     url = HTTP_VIEW_URL
     name = "api:planetpod_local"
-    requires_auth = False  # Firmware sends no auth header for local targets.
+    requires_auth = False
 
     async def post(self, request: web.Request) -> web.Response:
         hass: HomeAssistant = request.app["hass"]
@@ -60,9 +45,6 @@ class PlanetpodLocalView(HomeAssistantView):
             _LOGGER.warning("POST /planetpod missing systemInfo.podSerialNumber")
             return web.Response(status=400, text="Missing systemInfo.podSerialNumber")
 
-        # No 503-if-no-coordinator here on purpose: a pod's very first POST,
-        # before any config entry exists, is exactly what the config flow's
-        # "connect" step is waiting to see (buffered below).
         coordinator = _get_any_coordinator(hass)
         if coordinator is not None:
             coordinator.ingest_post(serial, payload)
@@ -78,7 +60,20 @@ class PlanetpodLocalView(HomeAssistantView):
 
         serial = request.query.get(QUERY_PARAM_SERIAL)
         if not serial:
-            return web.Response(status=400, text="Missing ?serial=<serial>")
+            known = coordinator.known_serials()
+            if len(known) == 1:
+                serial = next(iter(known))
+                _LOGGER.debug(
+                    "GET /planetpod with no ?serial= -- assuming the only known pod: %s",
+                    serial,
+                )
+            elif len(known) > 1:
+                return web.Response(
+                    status=400,
+                    text="Missing ?serial=<serial> and multiple pods are known -- cannot guess which one",
+                )
+            else:
+                return web.Response(status=400, text="Missing ?serial=<serial>")
 
         response = coordinator.get_response_for(serial)
         if response is None:
