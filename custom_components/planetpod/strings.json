@@ -22,7 +22,8 @@
         "title": "Planetpod",
         "description": "Which grid meter reading should Balance mode use?",
         "data": {
-          "g1_choice": "G1 source"
+          "g1_source": "G1 source",
+          "g1_ha_entity_id": "Home Assistant sensor"
         }
       },
       "local_connect": {
@@ -44,7 +45,8 @@
         "title": "Reconfigure Planetpod",
         "description": "Which grid meter reading should Balance mode use?",
         "data": {
-          "g1_choice": "G1 source"
+          "g1_source": "G1 source",
+          "g1_ha_entity_id": "Home Assistant sensor"
         }
       },
       "reauth_confirm": {
@@ -64,13 +66,13 @@
       "grid_not_found": "No grid found for this API key.",
       "no_data_yet": "Planetpod API is reachable, but no pod data is available yet for this grid. Try again shortly.",
       "invalid_response": "Planetpod API returned an unexpected response format.",
-      "unknown": "Unexpected error. Check the logs for details."
+      "unknown": "Unexpected error. Check the logs for details.",
+      "g1_entity_required": "Choose a sensor, or switch back to \"Pod-reported\"."
     },
     "abort": {
       "already_configured": "This Planetpod grid is already configured.",
       "reauth_successful": "Re-authentication was successful.",
-      "reconfigure_successful": "Reconfiguration was successful.",
-      "no_g1_candidate_to_reconfigure": "No compatible grid meter sensor was found -- nothing to reconfigure. Balance mode is using the pod-reported G1 value."
+      "reconfigure_successful": "Reconfiguration was successful."
     }
   },
   "entity": {

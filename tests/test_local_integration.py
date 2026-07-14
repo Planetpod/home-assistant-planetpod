@@ -12,10 +12,15 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from homeassistant import config_entries
+
 from custom_components.planetpod.const import (
     CONF_CONNECTION_TYPE,
+    CONF_G1_SOURCE,
     CONNECTION_TYPE_LOCAL,
     DOMAIN,
+    G1_SOURCE_POD,
+    PENDING_PODS_KEY,
 )
 
 MOCK_LOCAL_PAYLOAD = {
@@ -80,10 +85,41 @@ async def test_reconfigure_local_entry_shows_g1_step_not_api_key_form(
         context={"source": "reconfigure", "entry_id": entry.entry_id},
     )
 
-    # No G1 candidate exists in this test hass, so this aborts rather than
-    # showing a form -- either way, it must not be the cloud "reconfigure"
-    # (api_key) step.
-    assert result.get("step_id") != "reconfigure"
+    # Must always show the local G1-source form (never the cloud API-key
+    # form), even with no auto-detected candidate sensor in this test hass --
+    # the user can still pick any sensor manually via the entity selector.
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "reconfigure_local"
+
+
+async def test_local_setup_completes_via_g1_form_with_no_candidate_detected(
+    hass: HomeAssistant,
+):
+    """Regression test: the G1-source step must always show a real form and
+    let setup complete (default to pod-reported), even when no P1/DSMR-like
+    sensor is auto-detected -- it must not silently skip/auto-decide.
+    """
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_CONNECTION_TYPE: CONNECTION_TYPE_LOCAL}
+    )
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "local_connect"
+
+    hass.data.setdefault(DOMAIN, {}).setdefault(PENDING_PODS_KEY, {})["PP-001"] = MOCK_LOCAL_PAYLOAD
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "local_g1"
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_G1_SOURCE: G1_SOURCE_POD}
+    )
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["options"][CONF_G1_SOURCE] == G1_SOURCE_POD
 
 
 async def test_command_button_sets_one_shot_flag_on_next_get(hass: HomeAssistant):
