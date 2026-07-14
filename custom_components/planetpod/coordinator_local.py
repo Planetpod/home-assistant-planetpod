@@ -33,6 +33,34 @@ from .pod_status import build_pod_status
 
 _LOGGER = logging.getLogger(__name__)
 
+# One-shot command flags matching the fields planetpod_get.ts sends today:
+# Toggle_calibration, Reboot, TurnOffBMS, UnlockBMS/Unlock (SCU), Debug_on.
+# Standby isn't a real cloud toggle field (it's a Modus value) but is
+# offered here as an equivalent one-shot action pending a real design.
+ONE_SHOT_COMMANDS = (
+    "reboot",
+    "toggle_calibration",
+    "turn_off_bms",
+    "unlock_scu",
+    "debug_on",
+    "standby",
+)
+
+# Maps our internal command name to the JSON field the cloud/firmware
+# contract already uses, per planetpod_get.ts's response shape.
+_COMMAND_TO_RESPONSE_FIELD = {
+    "reboot": "Reboot",
+    "toggle_calibration": "Toggle_calibration",
+    "turn_off_bms": "TurnOffBMS",
+    "unlock_scu": "Unlock",
+    "debug_on": "Debug_on",
+    "standby": "Standby",
+}
+
+
+def _build_command_flags(pending: set[str]) -> dict[str, bool]:
+    return {_COMMAND_TO_RESPONSE_FIELD[command]: True for command in pending}
+
 
 class PlanetpodLocalCoordinator(DataUpdateCoordinator):
     """Holds latest per-pod state for one install, pushed from HTTP POSTs."""
@@ -43,7 +71,17 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
         self._raw_payloads: dict[str, dict[str, Any]] = {}
         self._last_message_at: dict[str, datetime] = {}
         self._last_requested_power_kw: dict[str, float] = {}
+        self._pending_commands: dict[str, set[str]] = {}
         self.async_set_updated_data({"pods": []})
+
+    def trigger_command(self, serial: str, command: str) -> None:
+        """Queue a one-shot command (reboot, calibration, ...) for a pod.
+
+        Sent on the pod's next GET, then cleared -- not a persistent state.
+        """
+        if command not in ONE_SHOT_COMMANDS:
+            raise ValueError(f"Unknown command: {command}")
+        self._pending_commands.setdefault(serial, set()).add(command)
 
     @property
     def mode(self) -> str:
@@ -114,6 +152,10 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
         if set_point is not None:
             self._last_requested_power_kw[serial] = set_point
             self._rebuild()
+
+        pending = self._pending_commands.pop(serial, None)
+        if pending:
+            response.update(_build_command_flags(pending))
 
         return response
 

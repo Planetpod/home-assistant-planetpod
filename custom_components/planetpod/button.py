@@ -1,0 +1,102 @@
+"""Button platform for Planetpod integration (local mode only).
+
+One-shot device actions -- Reboot, Toggle Calibration, Turn Off BMS,
+Unlock SCU, Debug, Standby -- matching the toggle fields planetpod_get.ts
+already sends today. These are per-pod, not install-level, since each
+command targets one specific battery.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+from homeassistant.components.button import ButtonEntity, ButtonEntityDescription
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
+from .const import ATTR_ATTRIBUTION, CONF_CONNECTION_TYPE, CONNECTION_TYPE_LOCAL, DOMAIN, MANUFACTURER
+from .coordinator_local import PlanetpodLocalCoordinator
+
+
+@dataclass
+class PlanetpodButtonEntityDescription(ButtonEntityDescription):
+    """Describes a one-shot Planetpod command button."""
+
+    command: str = ""
+
+
+BUTTON_DESCRIPTIONS: tuple[PlanetpodButtonEntityDescription, ...] = (
+    PlanetpodButtonEntityDescription(key="reboot", name="Reboot", command="reboot"),
+    PlanetpodButtonEntityDescription(
+        key="toggle_calibration", name="Calibration", command="toggle_calibration"
+    ),
+    PlanetpodButtonEntityDescription(
+        key="turn_off_bms", name="Turn Off BMS", command="turn_off_bms"
+    ),
+    PlanetpodButtonEntityDescription(key="unlock_scu", name="Unlock SCU", command="unlock_scu"),
+    PlanetpodButtonEntityDescription(key="debug_on", name="Debug", command="debug_on"),
+    PlanetpodButtonEntityDescription(key="standby", name="Standby", command="standby"),
+)
+
+
+async def async_setup_entry(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up command buttons for Planetpod (local mode only)."""
+    if entry.data.get(CONF_CONNECTION_TYPE) != CONNECTION_TYPE_LOCAL:
+        return
+
+    coordinator: PlanetpodLocalCoordinator = hass.data[DOMAIN][entry.entry_id]
+
+    known_serials: set[str] = set()
+
+    def _add_new_pods() -> None:
+        pods: list[dict] = coordinator.data.get("pods", []) if coordinator.data else []
+        new_entities: list[PlanetpodCommandButton] = []
+        for pod in pods:
+            serial = pod.get("battery", {}).get("serial_number")
+            if not serial or serial in known_serials:
+                continue
+            known_serials.add(serial)
+            for description in BUTTON_DESCRIPTIONS:
+                new_entities.append(PlanetpodCommandButton(coordinator, entry, description, serial))
+        if new_entities:
+            async_add_entities(new_entities, False)
+
+    _add_new_pods()
+    entry.async_on_unload(coordinator.async_add_listener(_add_new_pods))
+
+
+class PlanetpodCommandButton(CoordinatorEntity[PlanetpodLocalCoordinator], ButtonEntity):
+    """A one-shot command button for a specific pod."""
+
+    entity_description: PlanetpodButtonEntityDescription
+    _attr_has_entity_name = True
+    _attr_attribution = ATTR_ATTRIBUTION
+
+    def __init__(
+        self,
+        coordinator: PlanetpodLocalCoordinator,
+        entry: ConfigEntry,
+        description: PlanetpodButtonEntityDescription,
+        serial_number: str,
+    ) -> None:
+        super().__init__(coordinator)
+        self.entity_description = description
+        self._serial = serial_number
+        self._attr_unique_id = f"{entry.entry_id}_{serial_number}_{description.key}"
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return {
+            "identifiers": {(DOMAIN, self._serial)},
+            "name": f"Planetpod {self._serial}",
+            "manufacturer": MANUFACTURER,
+        }
+
+    async def async_press(self) -> None:
+        self.coordinator.trigger_command(self._serial, self.entity_description.command)
