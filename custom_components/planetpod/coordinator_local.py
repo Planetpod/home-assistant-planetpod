@@ -83,7 +83,10 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
                 last_message_at=self._last_message_at.get(serial),
                 last_requested_power_kw=self._last_requested_power_kw.get(serial),
             )
-            status["status"]["app_mode"] = self.mode
+            # app_mode is a cloud-only concept (cash/solar/solarSmart/
+            # solarPure) with a fixed ENUM sensor schema -- Balance/Speed is
+            # a different concept, exposed separately via the Mode select
+            # entity (select.py), not this field.
             pods.append(status)
         self.async_set_updated_data({"pods": pods})
 
