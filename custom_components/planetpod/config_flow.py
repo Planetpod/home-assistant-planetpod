@@ -12,6 +12,7 @@ from homeassistant import config_entries
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api_local import ensure_local_view_registered
@@ -33,6 +34,35 @@ from .helpers import is_valid_grid_payload, read_json_payload
 _LOGGER = logging.getLogger(__name__)
 
 _G1_CANDIDATE_HINTS = ("dsmr", "p1_meter", "power_consumption")
+
+
+def _g1_schema(*, default_source: str, default_entity_id: str | None) -> vol.Schema:
+    """Build the G1-source form schema, always letting the user pick manually."""
+    fields: dict[Any, Any] = {
+        vol.Required(CONF_G1_SOURCE, default=default_source): vol.In(
+            {
+                G1_SOURCE_POD: "Pod-reported",
+                G1_SOURCE_HA_SENSOR: "Use a Home Assistant sensor",
+            }
+        ),
+    }
+    entity_selector = selector.EntitySelector(selector.EntitySelectorConfig(domain="sensor"))
+    if default_entity_id:
+        fields[vol.Optional(CONF_G1_HA_ENTITY_ID, default=default_entity_id)] = entity_selector
+    else:
+        fields[vol.Optional(CONF_G1_HA_ENTITY_ID)] = entity_selector
+    return vol.Schema(fields)
+
+
+def _g1_options_from_input(user_input: dict[str, Any]) -> tuple[dict[str, Any], str | None]:
+    """Return (options, error) from a submitted G1-source form."""
+    source = user_input[CONF_G1_SOURCE]
+    if source == G1_SOURCE_HA_SENSOR:
+        entity_id = user_input.get(CONF_G1_HA_ENTITY_ID)
+        if not entity_id:
+            return {}, "g1_entity_required"
+        return {CONF_G1_SOURCE: G1_SOURCE_HA_SENSOR, CONF_G1_HA_ENTITY_ID: entity_id}, None
+    return {CONF_G1_SOURCE: G1_SOURCE_POD}, None
 
 
 def _classify_404_error(payload: dict[str, Any] | None) -> str:
@@ -211,38 +241,26 @@ class PlanetpodConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Handle reconfiguration of a local-mode entry: change the G1 source."""
         entry = self._get_reconfigure_entry()
-        candidate = _find_g1_candidate(self.hass)
+        errors: dict[str, str] = {}
 
         if user_input is not None:
-            options: dict[str, Any] = {CONF_G1_SOURCE: G1_SOURCE_POD}
-            if candidate and user_input.get("g1_choice") == candidate:
-                options[CONF_G1_SOURCE] = G1_SOURCE_HA_SENSOR
-                options[CONF_G1_HA_ENTITY_ID] = candidate
-            self.hass.config_entries.async_update_entry(entry, options=options)
-            return await self.async_update_reload_and_abort(entry)
+            options, error = _g1_options_from_input(user_input)
+            if error:
+                errors["base"] = error
+            else:
+                self.hass.config_entries.async_update_entry(entry, options=options)
+                return await self.async_update_reload_and_abort(entry)
 
-        if candidate is None:
-            return self.async_abort(reason="no_g1_candidate_to_reconfigure")
+        current_source = entry.options.get(CONF_G1_SOURCE, G1_SOURCE_POD)
+        current_entity_id = entry.options.get(CONF_G1_HA_ENTITY_ID)
 
         return self.async_show_form(
             step_id="reconfigure_local",
-            data_schema=vol.Schema(
-                {
-                    vol.Required(
-                        "g1_choice",
-                        default=(
-                            candidate
-                            if entry.options.get(CONF_G1_SOURCE) == G1_SOURCE_HA_SENSOR
-                            else G1_SOURCE_POD
-                        ),
-                    ): vol.In(
-                        {
-                            G1_SOURCE_POD: "Pod-reported",
-                            candidate: candidate,
-                        }
-                    ),
-                }
+            data_schema=_g1_schema(
+                default_source=current_source,
+                default_entity_id=current_entity_id or _find_g1_candidate(self.hass),
             ),
+            errors=errors,
         )
 
     async def async_step_reauth(self, entry_data: Mapping[str, Any]) -> FlowResult:
@@ -303,38 +321,27 @@ class PlanetpodConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_local_g1(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Ask which G1 reading Balance mode should use, if a candidate exists."""
+        """Ask which G1 reading Balance mode should use -- always shown, the
+        user can pick any sensor manually even if none was auto-detected."""
         candidate = _find_g1_candidate(self.hass)
-
-        if candidate is None:
-            return self.async_create_entry(
-                title="Planetpod",
-                data={CONF_CONNECTION_TYPE: CONNECTION_TYPE_LOCAL},
-                options={CONF_G1_SOURCE: G1_SOURCE_POD},
-            )
+        errors: dict[str, str] = {}
 
         if user_input is not None:
-            options: dict[str, Any] = {CONF_G1_SOURCE: G1_SOURCE_POD}
-            if user_input["g1_choice"] == candidate:
-                options[CONF_G1_SOURCE] = G1_SOURCE_HA_SENSOR
-                options[CONF_G1_HA_ENTITY_ID] = candidate
-            return self.async_create_entry(
-                title="Planetpod",
-                data={CONF_CONNECTION_TYPE: CONNECTION_TYPE_LOCAL},
-                options=options,
-            )
+            options, error = _g1_options_from_input(user_input)
+            if error:
+                errors["base"] = error
+            else:
+                return self.async_create_entry(
+                    title="Planetpod",
+                    data={CONF_CONNECTION_TYPE: CONNECTION_TYPE_LOCAL},
+                    options=options,
+                )
 
         return self.async_show_form(
             step_id="local_g1",
-            data_schema=vol.Schema(
-                {
-                    vol.Required("g1_choice", default=G1_SOURCE_POD): vol.In(
-                        {
-                            G1_SOURCE_POD: "Pod-reported",
-                            candidate: candidate,
-                            "not_now": "Not now",
-                        }
-                    ),
-                }
+            data_schema=_g1_schema(
+                default_source=G1_SOURCE_HA_SENSOR if candidate else G1_SOURCE_POD,
+                default_entity_id=candidate,
             ),
+            errors=errors,
         )
