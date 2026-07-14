@@ -14,7 +14,6 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     PERCENTAGE,
-    UnitOfElectricCurrent,
     UnitOfPower,
     UnitOfTemperature,
     UnitOfElectricPotential,
@@ -177,45 +176,28 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda pod: pod["battery"]["soc_lower_limit_pct"],
     ),
+    # Local-mode only: pod.get("balance") doesn't exist for cloud entries,
+    # so these stay "unknown" there rather than raising.
     PlanetpodSensorEntityDescription(
-        key="g1_solar_power_kw",
-        name="G1 Solar Power",
+        key="balance_source",
+        name="Balance Source",
+        value_fn=lambda pod: pod.get("balance", {}).get("source_label"),
+    ),
+    PlanetpodSensorEntityDescription(
+        key="balance_g1_power_delivered_kw",
+        name="Balance G1 Power Delivered",
         native_unit_of_measurement=UnitOfPower.KILO_WATT,
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda pod: pod["g1"]["solar_power_kw"],
+        value_fn=lambda pod: pod.get("balance", {}).get("power_delivered_kw"),
     ),
     PlanetpodSensorEntityDescription(
-        key="g1_raw_solar_current_a",
-        name="G1 Raw Solar Current",
-        native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
-        device_class=SensorDeviceClass.CURRENT,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda pod: pod["g1"]["raw_solar_current_a"],
-    ),
-    PlanetpodSensorEntityDescription(
-        key="g1_solar_phase",
-        name="G1 Solar Phase",
-        translation_key="g1_solar_phase",
-        device_class=SensorDeviceClass.ENUM,
-        options=["single", "three"],
-        value_fn=lambda pod: pod["g1"]["solar_phase"],
-    ),
-    PlanetpodSensorEntityDescription(
-        key="g1_grid_import_power_kw",
-        name="G1 Grid Import Power",
+        key="balance_g1_power_returned_kw",
+        name="Balance G1 Power Returned",
         native_unit_of_measurement=UnitOfPower.KILO_WATT,
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda pod: pod["g1"]["grid_import_power_kw"],
-    ),
-    PlanetpodSensorEntityDescription(
-        key="g1_grid_export_power_kw",
-        name="G1 Grid Export Power",
-        native_unit_of_measurement=UnitOfPower.KILO_WATT,
-        device_class=SensorDeviceClass.POWER,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda pod: pod["g1"]["grid_export_power_kw"],
+        value_fn=lambda pod: pod.get("balance", {}).get("power_returned_kw"),
     ),
 )
 

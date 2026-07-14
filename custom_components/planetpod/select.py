@@ -2,7 +2,8 @@
 
 Lets an installer switch a local-mode install between Balance and Speed
 mode from the HA UI, instead of it being fixed at whatever was set up
-initially.
+initially. Mode is shared across the install but shown on each pod's own
+device, same reasoning as number.py's SoC limits.
 """
 from __future__ import annotations
 
@@ -39,31 +40,50 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the mode select entity for Planetpod (local mode only)."""
+    """Set up the mode select entity for Planetpod (local mode only), one per pod."""
     if entry.data.get(CONF_CONNECTION_TYPE) != CONNECTION_TYPE_LOCAL:
         return
 
     coordinator: PlanetpodLocalCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities([PlanetpodModeSelect(coordinator, entry)])
+
+    known_serials: set[str] = set()
+
+    def _add_new_pods() -> None:
+        pods: list[dict] = coordinator.data.get("pods", []) if coordinator.data else []
+        new_entities: list[PlanetpodModeSelect] = []
+        for pod in pods:
+            serial = pod.get("battery", {}).get("serial_number")
+            if not serial or serial in known_serials:
+                continue
+            known_serials.add(serial)
+            new_entities.append(PlanetpodModeSelect(coordinator, entry, serial))
+        if new_entities:
+            async_add_entities(new_entities, False)
+
+    _add_new_pods()
+    entry.async_on_unload(coordinator.async_add_listener(_add_new_pods))
 
 
 class PlanetpodModeSelect(CoordinatorEntity[PlanetpodLocalCoordinator], SelectEntity):
-    """Balance/Speed mode selector for a local-mode Planetpod install."""
+    """Balance/Speed mode selector, shared across the install but shown per-pod."""
 
     entity_description = MODE_SELECT_DESCRIPTION
     _attr_has_entity_name = True
     _attr_attribution = ATTR_ATTRIBUTION
 
-    def __init__(self, coordinator: PlanetpodLocalCoordinator, entry: ConfigEntry) -> None:
+    def __init__(
+        self, coordinator: PlanetpodLocalCoordinator, entry: ConfigEntry, serial_number: str
+    ) -> None:
         super().__init__(coordinator)
         self._entry = entry
-        self._attr_unique_id = f"{entry.entry_id}_mode"
+        self._serial = serial_number
+        self._attr_unique_id = f"{entry.entry_id}_{serial_number}_mode"
 
     @property
     def device_info(self) -> dict[str, Any]:
         return {
-            "identifiers": {(DOMAIN, self._entry.entry_id)},
-            "name": "Planetpod",
+            "identifiers": {(DOMAIN, self._serial)},
+            "name": f"Planetpod {self._serial}",
             "manufacturer": MANUFACTURER,
         }
 

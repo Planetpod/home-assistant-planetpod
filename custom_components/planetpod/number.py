@@ -2,7 +2,10 @@
 
 Cloud entries get SoC limits as read-only sensors, sourced from the app;
 local entries have no cloud/app to configure them, so they're writable
-entities here instead.
+entities here instead. These values are mirrored across every pod on the
+install (see modus_controller.ts's grid-wide behavior), but are attached to
+each pod's own device so everything for that pod appears in one place --
+writing from any pod's slider updates the same shared config entry option.
 """
 from __future__ import annotations
 
@@ -71,19 +74,33 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up number entities for Planetpod (local mode only)."""
+    """Set up number entities for Planetpod (local mode only), one set per pod."""
     if entry.data.get(CONF_CONNECTION_TYPE) != CONNECTION_TYPE_LOCAL:
         return
 
     coordinator: PlanetpodLocalCoordinator = hass.data[DOMAIN][entry.entry_id]
-    async_add_entities(
-        PlanetpodSocLimitNumber(coordinator, entry, description)
-        for description in NUMBER_DESCRIPTIONS
-    )
+
+    known_serials: set[str] = set()
+
+    def _add_new_pods() -> None:
+        pods: list[dict] = coordinator.data.get("pods", []) if coordinator.data else []
+        new_entities: list[PlanetpodSocLimitNumber] = []
+        for pod in pods:
+            serial = pod.get("battery", {}).get("serial_number")
+            if not serial or serial in known_serials:
+                continue
+            known_serials.add(serial)
+            for description in NUMBER_DESCRIPTIONS:
+                new_entities.append(PlanetpodSocLimitNumber(coordinator, entry, description, serial))
+        if new_entities:
+            async_add_entities(new_entities, False)
+
+    _add_new_pods()
+    entry.async_on_unload(coordinator.async_add_listener(_add_new_pods))
 
 
 class PlanetpodSocLimitNumber(CoordinatorEntity[PlanetpodLocalCoordinator], NumberEntity):
-    """A writable SoC upper/lower limit for a local-mode Planetpod install."""
+    """A writable SoC upper/lower limit, shared across the install but shown per-pod."""
 
     entity_description: PlanetpodNumberEntityDescription
     _attr_has_entity_name = True
@@ -94,17 +111,19 @@ class PlanetpodSocLimitNumber(CoordinatorEntity[PlanetpodLocalCoordinator], Numb
         coordinator: PlanetpodLocalCoordinator,
         entry: ConfigEntry,
         description: PlanetpodNumberEntityDescription,
+        serial_number: str,
     ) -> None:
         super().__init__(coordinator)
         self.entity_description = description
         self._entry = entry
-        self._attr_unique_id = f"{entry.entry_id}_{description.key}"
+        self._serial = serial_number
+        self._attr_unique_id = f"{entry.entry_id}_{serial_number}_{description.key}"
 
     @property
     def device_info(self) -> dict[str, Any]:
         return {
-            "identifiers": {(DOMAIN, self._entry.entry_id)},
-            "name": "Planetpod",
+            "identifiers": {(DOMAIN, self._serial)},
+            "name": f"Planetpod {self._serial}",
             "manufacturer": MANUFACTURER,
         }
 
