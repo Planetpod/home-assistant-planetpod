@@ -177,15 +177,17 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
         value_fn=lambda pod: pod["battery"]["soc_lower_limit_pct"],
     ),
     # Local-mode only: pod.get("balance") doesn't exist for cloud entries,
-    # so these stay "unknown" there rather than raising.
+    # so these stay "unknown" there rather than raising. Named with a "P1"
+    # prefix so they sort together, separate from the battery sensors above,
+    # on the device page.
     PlanetpodSensorEntityDescription(
         key="balance_source",
-        name="Balance Source",
+        name="P1 Balance Source",
         value_fn=lambda pod: pod.get("balance", {}).get("source_label"),
     ),
     PlanetpodSensorEntityDescription(
         key="balance_g1_power_delivered_kw",
-        name="Balance G1 Power Delivered",
+        name="P1 Power Delivered",
         native_unit_of_measurement=UnitOfPower.KILO_WATT,
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,
@@ -193,7 +195,7 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
     ),
     PlanetpodSensorEntityDescription(
         key="balance_g1_power_returned_kw",
-        name="Balance G1 Power Returned",
+        name="P1 Power Returned",
         native_unit_of_measurement=UnitOfPower.KILO_WATT,
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,

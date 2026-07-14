@@ -171,7 +171,7 @@ async def test_balance_source_sensor_reflects_g1_config(hass: HomeAssistant):
     coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
     await hass.async_block_till_done()
 
-    state = hass.states.get("sensor.planetpod_pp_001_balance_source")
+    state = hass.states.get("sensor.planetpod_pp_001_p1_balance_source")
     assert state is not None
     assert state.state == "Pod-reported"
 
@@ -185,10 +185,10 @@ async def test_balance_source_sensor_reflects_g1_config(hass: HomeAssistant):
     coordinator.async_options_updated()
     await hass.async_block_till_done()
 
-    state = hass.states.get("sensor.planetpod_pp_001_balance_source")
+    state = hass.states.get("sensor.planetpod_pp_001_p1_balance_source")
     assert state.state == "My P1 Meter"
 
-    delivered = hass.states.get("sensor.planetpod_pp_001_balance_g1_power_delivered")
+    delivered = hass.states.get("sensor.planetpod_pp_001_p1_power_delivered")
     assert float(delivered.state) == 1.5
 
     # SoC/Mode controls must be on the pod's own device, not a separate one.
