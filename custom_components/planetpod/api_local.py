@@ -9,7 +9,7 @@ from homeassistant.components.http import HomeAssistantView
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN, HTTP_VIEW_URL, PENDING_PODS_KEY, QUERY_PARAM_SERIAL
-from .coordinator import PlanetpodLocalCoordinator
+from .coordinator_local import PlanetpodLocalCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -18,7 +18,8 @@ def _get_any_coordinator(hass: HomeAssistant) -> PlanetpodLocalCoordinator | Non
     for key, value in hass.data.get(DOMAIN, {}).items():
         if key == PENDING_PODS_KEY:
             continue
-        return value
+        if isinstance(value, PlanetpodLocalCoordinator):
+            return value
     return None
 
 

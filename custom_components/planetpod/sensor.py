@@ -25,6 +25,9 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import ATTR_ATTRIBUTION, DOMAIN, MANUFACTURER
 from .coordinator import PlanetpodDataUpdateCoordinator
+from .coordinator_local import PlanetpodLocalCoordinator
+
+AnyPlanetpodCoordinator = PlanetpodDataUpdateCoordinator | PlanetpodLocalCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -182,7 +185,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up sensor platform for Planetpod."""
-    coordinator: PlanetpodDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: AnyPlanetpodCoordinator = hass.data[DOMAIN][entry.entry_id]
 
     known_serials: set[str] = set()
 
@@ -207,7 +210,7 @@ async def async_setup_entry(
     entry.async_on_unload(coordinator.async_add_listener(_add_new_pods))
 
 
-class PlanetpodSensor(CoordinatorEntity[PlanetpodDataUpdateCoordinator], SensorEntity):
+class PlanetpodSensor(CoordinatorEntity[AnyPlanetpodCoordinator], SensorEntity):
     """Representation of a Planetpod sensor."""
 
     entity_description: PlanetpodSensorEntityDescription
@@ -216,7 +219,7 @@ class PlanetpodSensor(CoordinatorEntity[PlanetpodDataUpdateCoordinator], SensorE
 
     def __init__(
         self,
-        coordinator: PlanetpodDataUpdateCoordinator,
+        coordinator: AnyPlanetpodCoordinator,
         entry: ConfigEntry,
         description: PlanetpodSensorEntityDescription,
         serial_number: str,
