@@ -1,5 +1,7 @@
 # Home Assistant Planetpod Integration
 
+## Local Mode (WIP — `feat/localMode` branch)
+
 Monitor your Planetpod solar battery from Home Assistant. The integration polls the Planetpod cloud API every 60 seconds — sensor data is routed through Planetpod's servers, not read directly from the hardware on your local network.
 
 ## Requirements
