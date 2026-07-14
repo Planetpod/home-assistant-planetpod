@@ -2,6 +2,13 @@
   "config": {
     "step": {
       "user": {
+        "title": "How does your Planetpod connect?",
+        "description": "Cloud: connects through PlanetPod's cloud service. Works out of the box, requires an internet connection.\n\nLocal: connects directly to your battery over your home network. Useful to run your own algorithms and automations against it.",
+        "data": {
+          "connection_type": "Connection type"
+        }
+      },
+      "cloud": {
         "title": "Connect to Planetpod",
         "description": "Enter your Planetpod Open API credentials. You can generate a key in the Planetpod app under Settings → API.",
         "data": {
@@ -10,6 +17,18 @@
         "data_description": {
           "api_key": "Bearer token starting with pp_"
         }
+      },
+      "local_g1": {
+        "title": "Planetpod",
+        "description": "Which grid meter reading should Balance mode use?",
+        "data": {
+          "g1_choice": "G1 source"
+        }
+      },
+      "local_connect": {
+        "title": "Connect your Planetpod",
+        "description": "Your battery automatically tries the cloud first, then falls back to this Home Assistant instance if the cloud isn't reachable.\n\n**Home Assistant address:** `{ha_address}`\n\n⏳ Waiting for connection… Press Submit to check again.",
+        "data": {}
       },
       "reconfigure": {
         "title": "Reconfigure Planetpod",

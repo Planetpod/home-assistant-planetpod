@@ -9,14 +9,29 @@ from typing import Any
 import aiohttp
 import voluptuous as vol
 from homeassistant import config_entries
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from .const import CONF_API_KEY, DEFAULT_API_URL, DOMAIN
+from .const import (
+    CONF_API_KEY,
+    CONF_CONNECTION_TYPE,
+    CONF_G1_HA_ENTITY_ID,
+    CONF_G1_SOURCE,
+    CONNECTION_TYPE_CLOUD,
+    CONNECTION_TYPE_LOCAL,
+    DEFAULT_API_URL,
+    DOMAIN,
+    G1_SOURCE_HA_SENSOR,
+    G1_SOURCE_POD,
+    PENDING_PODS_KEY,
+)
 from .helpers import is_valid_grid_payload, read_json_payload
 
 _LOGGER = logging.getLogger(__name__)
+
+_G1_CANDIDATE_HINTS = ("dsmr", "p1_meter", "power_consumption")
 
 
 def _classify_404_error(payload: dict[str, Any] | None) -> str:
@@ -61,10 +76,32 @@ async def _validate_connection(
     return payload["grid_id"], None
 
 
+@callback
+def _find_g1_candidate(hass: HomeAssistant) -> str | None:
+    registry = er.async_get(hass)
+    for entry in registry.entities.values():
+        if entry.domain != "sensor":
+            continue
+        entity_id = entry.entity_id.lower()
+        if any(hint in entity_id for hint in _G1_CANDIDATE_HINTS):
+            return entry.entity_id
+    return None
+
+
+def _ha_address(hass: HomeAssistant) -> str:
+    if hass.config.internal_url:
+        return hass.config.internal_url
+    port = hass.http.server_port if hass.http else 8123
+    return f"http://homeassistant.local:{port}"
+
+
 class PlanetpodConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Planetpod."""
 
     VERSION = 1
+
+    def __init__(self) -> None:
+        self._local_options: dict[str, Any] = {}
 
     # Compatibility shims for HA < 2024.x
     def _get_reconfigure_entry(self) -> config_entries.ConfigEntry:
@@ -92,10 +129,34 @@ class PlanetpodConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await self.hass.config_entries.async_reload(entry.entry_id)
         return self.async_abort(reason=reason)
 
+    # --- Entry point: choose Cloud vs Local -----------------------------
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        """Handle the initial step."""
+        """Handle the initial step: how does your Planetpod connect."""
+        if user_input is not None:
+            if user_input[CONF_CONNECTION_TYPE] == CONNECTION_TYPE_LOCAL:
+                return await self.async_step_local_g1()
+            return await self.async_step_cloud()
+
+        return self.async_show_form(
+            step_id="user",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_CONNECTION_TYPE, default=CONNECTION_TYPE_CLOUD
+                    ): vol.In([CONNECTION_TYPE_CLOUD, CONNECTION_TYPE_LOCAL])
+                }
+            ),
+        )
+
+    # --- Cloud path (existing behavior, unmodified) ----------------------
+
+    async def async_step_cloud(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle the cloud API-key step."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -107,11 +168,14 @@ class PlanetpodConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(
                     title="Planetpod",
-                    data={CONF_API_KEY: user_input[CONF_API_KEY]},
+                    data={
+                        CONF_API_KEY: user_input[CONF_API_KEY],
+                        CONF_CONNECTION_TYPE: CONNECTION_TYPE_CLOUD,
+                    },
                 )
 
         return self.async_show_form(
-            step_id="user",
+            step_id="cloud",
             data_schema=vol.Schema({vol.Required(CONF_API_KEY): str}),
             errors=errors,
         )
@@ -168,4 +232,60 @@ class PlanetpodConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="reauth_confirm",
             data_schema=vol.Schema({vol.Required(CONF_API_KEY): str}),
             errors=errors,
+        )
+
+    # --- Local path -------------------------------------------------------
+
+    async def async_step_local_g1(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Ask which G1 reading Balance mode should use, if a candidate exists."""
+        await self.async_set_unique_id("planetpod_local")
+        self._abort_if_unique_id_configured()
+
+        candidate = _find_g1_candidate(self.hass)
+
+        if candidate is None:
+            self._local_options = {CONF_G1_SOURCE: G1_SOURCE_POD}
+            return await self.async_step_local_connect()
+
+        if user_input is not None:
+            self._local_options = {CONF_G1_SOURCE: G1_SOURCE_POD}
+            if user_input["g1_choice"] == candidate:
+                self._local_options[CONF_G1_SOURCE] = G1_SOURCE_HA_SENSOR
+                self._local_options[CONF_G1_HA_ENTITY_ID] = candidate
+            return await self.async_step_local_connect()
+
+        return self.async_show_form(
+            step_id="local_g1",
+            data_schema=vol.Schema(
+                {
+                    vol.Required("g1_choice", default=G1_SOURCE_POD): vol.In(
+                        {
+                            G1_SOURCE_POD: "Pod-reported",
+                            candidate: candidate,
+                            "not_now": "Not now",
+                        }
+                    ),
+                }
+            ),
+        )
+
+    async def async_step_local_connect(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Wait for at least one real pod connection before finishing setup."""
+        pending: dict[str, Any] = self.hass.data.get(DOMAIN, {}).get(PENDING_PODS_KEY, {})
+
+        if pending:
+            return self.async_create_entry(
+                title="Planetpod",
+                data={CONF_CONNECTION_TYPE: CONNECTION_TYPE_LOCAL},
+                options=self._local_options,
+            )
+
+        return self.async_show_form(
+            step_id="local_connect",
+            data_schema=vol.Schema({}),
+            description_placeholders={"ha_address": _ha_address(self.hass)},
         )
