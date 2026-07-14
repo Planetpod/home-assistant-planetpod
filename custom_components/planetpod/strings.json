@@ -66,6 +66,15 @@
     }
   },
   "entity": {
+    "select": {
+      "planetpod_mode": {
+        "name": "Mode",
+        "state": {
+          "balance": "Balance",
+          "speed": "Speed"
+        }
+      }
+    },
     "sensor": {
       "soc_pct": {
         "name": "State of Charge"

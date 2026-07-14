@@ -15,6 +15,10 @@ CONF_CONNECTION_TYPE = "connection_type"
 CONNECTION_TYPE_CLOUD = "cloud"
 CONNECTION_TYPE_LOCAL = "local"
 
+CONF_SOC_UPPER_LIMIT = "soc_upper_limit_pct"
+CONF_SOC_LOWER_LIMIT = "soc_lower_limit_pct"
+CONF_SOUND_MODE = "sound_mode"
+
 DEFAULT_SOC_UPPER_LIMIT = 85
 DEFAULT_SOC_LOWER_LIMIT = 20
 DEFAULT_SOUND_MODE = False
@@ -26,6 +30,11 @@ CONF_G1_SOURCE = "g1_source"
 G1_SOURCE_POD = "pod_reported"
 G1_SOURCE_HA_SENSOR = "ha_sensor"
 CONF_G1_HA_ENTITY_ID = "g1_ha_entity_id"
+
+CONF_MODE = "mode"
+MODE_BALANCE = "balance"
+MODE_SPEED = "speed"
+DEFAULT_MODE = MODE_BALANCE
 
 ONLINE_TIMEOUT_SECONDS = 60
 
