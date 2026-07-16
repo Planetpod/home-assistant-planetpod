@@ -18,6 +18,7 @@ from homeassistant.const import (
     UnitOfTemperature,
     UnitOfElectricPotential,
     SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+    EntityCategory,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -37,6 +38,7 @@ class PlanetpodSensorEntityDescription(SensorEntityDescription):
     """Describes a Planetpod sensor."""
 
     value_fn: Callable[[dict], Any] = lambda _: None
+    attr_fn: Callable[[dict], dict[str, Any]] = lambda _: {}
 
 
 SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
@@ -207,6 +209,16 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
         name="Speed Setpoint Status",
         value_fn=lambda pod: pod.get("speed_setpoint_status"),
     ),
+    # Diagnostic aid: lets you confirm what the pod is actually sending and
+    # when, from Developer Tools > States, without digging through HA logs.
+    PlanetpodSensorEntityDescription(
+        key="last_post_received",
+        name="Last POST Received",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda pod: pod.get("raw_post", {}).get("received_at"),
+        attr_fn=lambda pod: {"raw_payload": pod.get("raw_post", {}).get("payload")},
+    ),
 )
 
 
@@ -289,6 +301,17 @@ class PlanetpodSensor(CoordinatorEntity[AnyPlanetpodCoordinator], SensorEntity):
     def available(self) -> bool:
         """Return availability."""
         return super().available and self._get_pod() is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return per-sensor extra attributes, if this description defines any."""
+        pod = self._get_pod()
+        if pod is None:
+            return {}
+        try:
+            return self.entity_description.attr_fn(pod)
+        except (KeyError, TypeError):
+            return {}
 
     def _get_pod(self) -> dict | None:
         """Find this sensor's pod in coordinator data."""

@@ -17,8 +17,17 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import ATTR_ATTRIBUTION, CONF_CONNECTION_TYPE, CONNECTION_TYPE_LOCAL, DOMAIN, MANUFACTURER
+from .const import (
+    ATTR_ATTRIBUTION,
+    CONF_CONNECTION_TYPE,
+    CONNECTION_TYPE_LOCAL,
+    DOMAIN,
+    MANUFACTURER,
+    MODE_SPEED,
+)
 from .coordinator_local import PlanetpodLocalCoordinator
+
+SEND_SPEED_COMMAND = "send_speed_command"
 
 
 @dataclass
@@ -62,6 +71,13 @@ BUTTON_DESCRIPTIONS: tuple[PlanetpodButtonEntityDescription, ...] = (
     ),
 )
 
+# No entity_category -- this stays in the primary "Controls" section next to
+# the Speed Setpoint/Duration number entities it applies, not "Configuration"
+# with the one-shot pod commands above.
+SEND_SPEED_COMMAND_DESCRIPTION = PlanetpodButtonEntityDescription(
+    key=SEND_SPEED_COMMAND, name="Send Speed Command", command=SEND_SPEED_COMMAND
+)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -86,6 +102,9 @@ async def async_setup_entry(
             known_serials.add(serial)
             for description in BUTTON_DESCRIPTIONS:
                 new_entities.append(PlanetpodCommandButton(coordinator, entry, description, serial))
+            new_entities.append(
+                PlanetpodCommandButton(coordinator, entry, SEND_SPEED_COMMAND_DESCRIPTION, serial)
+            )
         if new_entities:
             async_add_entities(new_entities, False)
 
@@ -120,5 +139,14 @@ class PlanetpodCommandButton(CoordinatorEntity[PlanetpodLocalCoordinator], Butto
             "manufacturer": MANUFACTURER,
         }
 
+    @property
+    def available(self) -> bool:
+        if self.entity_description.command == SEND_SPEED_COMMAND:
+            return super().available and self.coordinator.mode == MODE_SPEED
+        return super().available
+
     async def async_press(self) -> None:
+        if self.entity_description.command == SEND_SPEED_COMMAND:
+            self.coordinator.send_speed_command()
+            return
         self.coordinator.trigger_command(self._serial, self.entity_description.command)

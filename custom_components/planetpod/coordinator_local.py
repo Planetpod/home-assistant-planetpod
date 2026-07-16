@@ -7,7 +7,7 @@ the local HTTP endpoint, and `async_set_updated_data` notifies entities.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -21,16 +21,17 @@ from .const import (
     CONF_SOC_LOWER_LIMIT,
     CONF_SOC_UPPER_LIMIT,
     CONF_SOUND_MODE,
+    CONF_SPEED_SETPOINT_DURATION_MIN,
     CONF_SPEED_SETPOINT_KW,
     DEFAULT_MODE,
     DEFAULT_SOC_LOWER_LIMIT,
     DEFAULT_SOC_UPPER_LIMIT,
     DEFAULT_SOUND_MODE,
+    DEFAULT_SPEED_SETPOINT_DURATION_MIN,
     DEFAULT_SPEED_SETPOINT_KW,
     DOMAIN,
     G1_SOURCE_HA_SENSOR,
     MODE_BALANCE,
-    SPEED_SETPOINT_TIMEOUT_MINUTES,
 )
 from .mode_logic import compute_get_response
 from .pod_status import build_pod_status
@@ -76,7 +77,7 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
         self._last_message_at: dict[str, datetime] = {}
         self._last_requested_power_kw: dict[str, float] = {}
         self._pending_commands: dict[str, set[str]] = {}
-        self._speed_setpoint_updated_at: datetime | None = None
+        self._speed_setpoint_expires_at: datetime | None = None
         self.async_set_updated_data({"pods": []})
 
     def trigger_command(self, serial: str, command: str) -> None:
@@ -108,30 +109,55 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
         """Recompute pod status after an option (SoC limits, sound mode, ...) changes."""
         self._rebuild()
 
-    def set_speed_setpoint(self, value: float) -> None:
-        """Write a new Speed Setpoint value and reset its expiry timer."""
+    @property
+    def speed_setpoint_duration_min(self) -> float:
+        return self.entry.options.get(
+            CONF_SPEED_SETPOINT_DURATION_MIN, DEFAULT_SPEED_SETPOINT_DURATION_MIN
+        )
+
+    def stage_speed_setpoint(self, value: float) -> None:
+        """Stage a Speed Setpoint value without sending it -- takes effect
+        only once send_speed_command() is called (the "Send Speed Command"
+        button), so Setpoint and Duration can both be set before applying."""
         new_options = {**self.entry.options, CONF_SPEED_SETPOINT_KW: value}
         self.hass.config_entries.async_update_entry(self.entry, options=new_options)
-        self._speed_setpoint_updated_at = datetime.now(timezone.utc)
+        self._rebuild()
+
+    def set_speed_setpoint_duration(self, value: float) -> None:
+        """Update how long a Speed Setpoint stays active once sent -- takes
+        effect the next time send_speed_command() is called, not retroactively."""
+        new_options = {**self.entry.options, CONF_SPEED_SETPOINT_DURATION_MIN: value}
+        self.hass.config_entries.async_update_entry(self.entry, options=new_options)
+        self._rebuild()
+
+    def set_speed_setpoint(self, value: float) -> None:
+        """Stage a Speed Setpoint value and immediately send it -- convenience
+        for programmatic callers (e.g. tests, or an EMHASS bridge automation
+        that wants one atomic call) that don't need the stage/send split."""
+        self.stage_speed_setpoint(value)
+        self.send_speed_command()
+
+    def send_speed_command(self) -> None:
+        """Apply the currently staged Speed Setpoint, active for
+        speed_setpoint_duration_min from now."""
+        self._speed_setpoint_expires_at = datetime.now(timezone.utc) + timedelta(
+            minutes=self.speed_setpoint_duration_min
+        )
         self._rebuild()
 
     @property
     def effective_speed_setpoint_kw(self) -> float:
-        """The Speed Setpoint to actually apply, or 0.0 if it has expired."""
-        if self._speed_setpoint_updated_at is None:
-            return DEFAULT_SPEED_SETPOINT_KW
-        age = datetime.now(timezone.utc) - self._speed_setpoint_updated_at
-        if age.total_seconds() > SPEED_SETPOINT_TIMEOUT_MINUTES * 60:
+        """The Speed Setpoint to actually apply, or 0.0 if its duration has elapsed."""
+        if not self.speed_setpoint_active:
             return DEFAULT_SPEED_SETPOINT_KW
         return self.entry.options.get(CONF_SPEED_SETPOINT_KW, DEFAULT_SPEED_SETPOINT_KW)
 
     @property
     def speed_setpoint_active(self) -> bool:
-        """Whether the current Speed Setpoint is being applied (not expired/unset)."""
-        if self._speed_setpoint_updated_at is None:
+        """Whether the current Speed Setpoint is still within its configured duration."""
+        if self._speed_setpoint_expires_at is None:
             return False
-        age = datetime.now(timezone.utc) - self._speed_setpoint_updated_at
-        return age.total_seconds() <= SPEED_SETPOINT_TIMEOUT_MINUTES * 60
+        return datetime.now(timezone.utc) < self._speed_setpoint_expires_at
 
     def ingest_post(self, serial: str, payload: dict[str, Any]) -> None:
         """Handle a POST /planetpod payload from one pod."""
@@ -155,6 +181,10 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
             # solarPure) with a fixed ENUM sensor schema -- Balance/Speed is
             # a different concept, exposed separately via the Mode select
             # entity (select.py), not this field.
+            status["raw_post"] = {
+                "payload": payload,
+                "received_at": self._last_message_at.get(serial),
+            }
             g1_delivered, g1_returned = self._resolve_g1(serial)
             no_p1 = g1_delivered is None and g1_returned is None
             status["balance"] = {

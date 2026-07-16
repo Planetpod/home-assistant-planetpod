@@ -23,17 +23,24 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
+from homeassistant.const import UnitOfTime
+
 from .const import (
     ATTR_ATTRIBUTION,
     CONF_CONNECTION_TYPE,
     CONF_SOC_LOWER_LIMIT,
     CONF_SOC_UPPER_LIMIT,
+    CONF_SPEED_SETPOINT_DURATION_MIN,
     CONF_SPEED_SETPOINT_KW,
     CONNECTION_TYPE_LOCAL,
+    DEFAULT_SPEED_SETPOINT_DURATION_MIN,
     DEFAULT_SPEED_SETPOINT_KW,
     DOMAIN,
     MANUFACTURER,
     MAX_CHARGE_POWER_KW,
+    MAX_SPEED_SETPOINT_DURATION_MIN,
+    MIN_SPEED_SETPOINT_DURATION_MIN,
+    MODE_SPEED,
 )
 from .coordinator_local import PlanetpodLocalCoordinator
 
@@ -81,6 +88,17 @@ NUMBER_DESCRIPTIONS: tuple[PlanetpodNumberEntityDescription, ...] = (
         value_fn=lambda coordinator: coordinator.entry.options.get(
             CONF_SPEED_SETPOINT_KW, DEFAULT_SPEED_SETPOINT_KW
         ),
+    ),
+    PlanetpodNumberEntityDescription(
+        key="speed_setpoint_duration_min",
+        name="Speed Setpoint Duration",
+        option_key=CONF_SPEED_SETPOINT_DURATION_MIN,
+        native_unit_of_measurement=UnitOfTime.MINUTES,
+        native_min_value=MIN_SPEED_SETPOINT_DURATION_MIN,
+        native_max_value=MAX_SPEED_SETPOINT_DURATION_MIN,
+        native_step=1,
+        mode=NumberMode.BOX,
+        value_fn=lambda coordinator: coordinator.speed_setpoint_duration_min,
     ),
 )
 
@@ -147,9 +165,23 @@ class PlanetpodSocLimitNumber(CoordinatorEntity[PlanetpodLocalCoordinator], Numb
     def native_value(self) -> float:
         return self.entity_description.value_fn(self.coordinator)
 
+    @property
+    def available(self) -> bool:
+        if self.entity_description.option_key in (
+            CONF_SPEED_SETPOINT_KW,
+            CONF_SPEED_SETPOINT_DURATION_MIN,
+        ):
+            return super().available and self.coordinator.mode == MODE_SPEED
+        return super().available
+
     async def async_set_native_value(self, value: float) -> None:
+        # Speed Setpoint/Duration are staged only -- editing them here does not
+        # send anything to the pod. Press "Send Speed Command" to apply.
         if self.entity_description.option_key == CONF_SPEED_SETPOINT_KW:
-            self.coordinator.set_speed_setpoint(value)
+            self.coordinator.stage_speed_setpoint(value)
+            return
+        if self.entity_description.option_key == CONF_SPEED_SETPOINT_DURATION_MIN:
+            self.coordinator.set_speed_setpoint_duration(value)
             return
         new_options = {**self._entry.options, self.entity_description.option_key: value}
         self.hass.config_entries.async_update_entry(self._entry, options=new_options)
