@@ -292,7 +292,7 @@ async def test_speed_setpoint_expires_to_idle(hass: HomeAssistant):
     await hass.async_block_till_done()
 
     coordinator.set_speed_setpoint(1.0)
-    coordinator._speed_setpoint_updated_at = datetime.now(timezone.utc) - timedelta(minutes=31)
+    coordinator._speed_setpoint_expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
     coordinator._rebuild()
     await hass.async_block_till_done()
 
@@ -302,6 +302,25 @@ async def test_speed_setpoint_expires_to_idle(hass: HomeAssistant):
 
     state = hass.states.get("sensor.planetpod_pp_001_speed_setpoint_status")
     assert state.state == "Expired (reverted to idle)"
+
+
+async def test_speed_setpoint_duration_changes_expiry_window(hass: HomeAssistant):
+    """Setting a shorter Speed Setpoint Duration must apply the new window
+    the next time a setpoint is set, not force an immediate expiry.
+    """
+    entry = await _setup_local_entry(hass, options={"mode": "speed"})
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    coordinator.set_speed_setpoint_duration(5)
+    assert coordinator.speed_setpoint_duration_min == 5
+
+    coordinator.set_speed_setpoint(1.5)
+    assert coordinator.effective_speed_setpoint_kw == 1.5
+
+    coordinator._speed_setpoint_expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    assert coordinator.effective_speed_setpoint_kw == 0.0
 
 
 async def test_balance_source_sensor_shows_no_p1_error(hass: HomeAssistant):
@@ -327,3 +346,99 @@ async def test_balance_source_sensor_shows_no_p1_error(hass: HomeAssistant):
 
     state = hass.states.get("sensor.planetpod_pp_001_p1_balance_source")
     assert state.state == "Can't balance: no P1 sensor"
+
+
+async def test_speed_setpoint_unavailable_unless_mode_is_speed(hass: HomeAssistant):
+    """The Speed Setpoint number entity must be unavailable (grayed out)
+    whenever Mode isn't Speed -- it has no effect in Balance mode, so it
+    shouldn't look editable/active on the device page.
+    """
+    entry = await _setup_local_entry(hass, options={"mode": "balance"})
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    state = hass.states.get("number.planetpod_pp_001_speed_setpoint")
+    assert state.state == "unavailable"
+
+    hass.config_entries.async_update_entry(entry, options={**entry.options, "mode": "speed"})
+    coordinator.async_options_updated()
+    await hass.async_block_till_done()
+
+    state = hass.states.get("number.planetpod_pp_001_speed_setpoint")
+    assert state.state != "unavailable"
+
+
+async def test_editing_speed_setpoint_number_does_not_send_until_button_pressed(
+    hass: HomeAssistant,
+):
+    """Editing the Speed Setpoint/Duration number entities must only stage
+    values -- nothing is actually sent to the pod until "Send Speed Command"
+    is pressed. This is what avoids the old order-dependency footgun where
+    changing Duration after Setpoint silently used the previous duration.
+    """
+    entry = await _setup_local_entry(hass, options={"mode": "speed"})
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    coordinator.stage_speed_setpoint(2.0)
+    coordinator.set_speed_setpoint_duration(10)
+
+    # Staged only -- not yet active/sent.
+    assert coordinator.effective_speed_setpoint_kw == 0.0
+    assert coordinator.speed_setpoint_active is False
+
+    await hass.services.async_call(
+        "button",
+        "press",
+        {"entity_id": "button.planetpod_pp_001_send_speed_command"},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    assert coordinator.speed_setpoint_active is True
+    response = coordinator.get_response_for("PP-001")
+    assert response["speed"] == 2.0
+    assert response["status"] == "charge"
+
+
+async def test_send_speed_command_button_unavailable_unless_mode_is_speed(
+    hass: HomeAssistant,
+):
+    """The Send Speed Command button must be unavailable outside Speed mode,
+    same as the Setpoint/Duration number entities it applies.
+    """
+    entry = await _setup_local_entry(hass, options={"mode": "balance"})
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    state = hass.states.get("button.planetpod_pp_001_send_speed_command")
+    assert state.state == "unavailable"
+
+    registry = er.async_get(hass)
+    entry_reg = registry.async_get("button.planetpod_pp_001_send_speed_command")
+    assert entry_reg is not None
+    assert entry_reg.entity_category is None
+
+
+async def test_last_post_received_sensor_exposes_raw_payload(hass: HomeAssistant):
+    """The Last POST Received sensor must expose a real timestamp state plus
+    the raw POST payload as an attribute, so the last message from a pod is
+    inspectable from Developer Tools > States without digging through logs.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.planetpod_pp_001_last_post_received")
+    assert state is not None
+    assert state.state != "unknown"
+    assert state.attributes["raw_payload"] == MOCK_LOCAL_PAYLOAD
+
+    registry = er.async_get(hass)
+    entry_reg = registry.async_get("sensor.planetpod_pp_001_last_post_received")
+    assert entry_reg is not None
+    assert entry_reg.entity_category == EntityCategory.DIAGNOSTIC
