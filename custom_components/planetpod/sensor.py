@@ -183,7 +183,8 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
     PlanetpodSensorEntityDescription(
         key="balance_source",
         name="P1 Balance Source",
-        value_fn=lambda pod: pod.get("balance", {}).get("source_label"),
+        value_fn=lambda pod: pod.get("balance", {}).get("error")
+        or pod.get("balance", {}).get("source_label"),
     ),
     PlanetpodSensorEntityDescription(
         key="balance_g1_power_delivered_kw",
@@ -200,6 +201,11 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda pod: pod.get("balance", {}).get("power_returned_kw"),
+    ),
+    PlanetpodSensorEntityDescription(
+        key="speed_setpoint_status",
+        name="Speed Setpoint Status",
+        value_fn=lambda pod: pod.get("speed_setpoint_status"),
     ),
 )
 

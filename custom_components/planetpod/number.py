@@ -18,7 +18,7 @@ from homeassistant.components.number import (
     NumberMode,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE
+from homeassistant.const import PERCENTAGE, UnitOfPower
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -28,9 +28,12 @@ from .const import (
     CONF_CONNECTION_TYPE,
     CONF_SOC_LOWER_LIMIT,
     CONF_SOC_UPPER_LIMIT,
+    CONF_SPEED_SETPOINT_KW,
     CONNECTION_TYPE_LOCAL,
+    DEFAULT_SPEED_SETPOINT_KW,
     DOMAIN,
     MANUFACTURER,
+    MAX_CHARGE_POWER_KW,
 )
 from .coordinator_local import PlanetpodLocalCoordinator
 
@@ -65,6 +68,19 @@ NUMBER_DESCRIPTIONS: tuple[PlanetpodNumberEntityDescription, ...] = (
         native_step=1,
         mode=NumberMode.SLIDER,
         value_fn=lambda coordinator: coordinator.soc_lower_limit_pct,
+    ),
+    PlanetpodNumberEntityDescription(
+        key="speed_setpoint_kw",
+        name="Speed Setpoint",
+        option_key=CONF_SPEED_SETPOINT_KW,
+        native_unit_of_measurement=UnitOfPower.KILO_WATT,
+        native_min_value=-MAX_CHARGE_POWER_KW,
+        native_max_value=MAX_CHARGE_POWER_KW,
+        native_step=0.1,
+        mode=NumberMode.BOX,
+        value_fn=lambda coordinator: coordinator.entry.options.get(
+            CONF_SPEED_SETPOINT_KW, DEFAULT_SPEED_SETPOINT_KW
+        ),
     ),
 )
 
@@ -132,6 +148,9 @@ class PlanetpodSocLimitNumber(CoordinatorEntity[PlanetpodLocalCoordinator], Numb
         return self.entity_description.value_fn(self.coordinator)
 
     async def async_set_native_value(self, value: float) -> None:
+        if self.entity_description.option_key == CONF_SPEED_SETPOINT_KW:
+            self.coordinator.set_speed_setpoint(value)
+            return
         new_options = {**self._entry.options, self.entity_description.option_key: value}
         self.hass.config_entries.async_update_entry(self._entry, options=new_options)
         self.coordinator.async_options_updated()
