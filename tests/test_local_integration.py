@@ -8,6 +8,8 @@ coordinator's data dict alone.
 """
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
@@ -244,3 +246,84 @@ async def test_command_buttons_are_config_category(hass: HomeAssistant):
         entry_reg = registry.async_get(entity_id)
         assert entry_reg is not None, f"{entity_id} not found"
         assert entry_reg.entity_category is None
+
+
+async def _setup_local_entry(hass: HomeAssistant, options: dict | None = None) -> MockConfigEntry:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Planetpod",
+        data={CONF_CONNECTION_TYPE: CONNECTION_TYPE_LOCAL},
+        options=options or {},
+        unique_id="planetpod_local",
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    return entry
+
+
+async def test_speed_setpoint_drives_get_response(hass: HomeAssistant):
+    """Setting the Speed Setpoint number entity must actually flow into the
+    next GET response once Mode is set to Speed -- this is the core bug fix:
+    speed_setpoint_kw was never wired into compute_get_response() before.
+    """
+    entry = await _setup_local_entry(hass, options={"mode": "speed"})
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    coordinator.set_speed_setpoint(2.5)
+
+    response = coordinator.get_response_for("PP-001")
+    assert response["speed"] == 2.5
+    assert response["status"] == "charge"
+
+    state = hass.states.get("sensor.planetpod_pp_001_speed_setpoint_status")
+    assert state.state == "Active"
+
+
+async def test_speed_setpoint_expires_to_idle(hass: HomeAssistant):
+    """A Speed Setpoint that hasn't been refreshed within the timeout window
+    must revert to 0/idle rather than keep applying a stale value.
+    """
+    entry = await _setup_local_entry(hass, options={"mode": "speed"})
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    coordinator.set_speed_setpoint(1.0)
+    coordinator._speed_setpoint_updated_at = datetime.now(timezone.utc) - timedelta(minutes=31)
+    coordinator._rebuild()
+    await hass.async_block_till_done()
+
+    response = coordinator.get_response_for("PP-001")
+    assert response["speed"] == 0.0
+    assert response["status"] == "idle"
+
+    state = hass.states.get("sensor.planetpod_pp_001_speed_setpoint_status")
+    assert state.state == "Expired (reverted to idle)"
+
+
+async def test_balance_source_sensor_shows_no_p1_error(hass: HomeAssistant):
+    """With Balance mode selected and no usable G1 reading (HA sensor
+    unavailable, no pod-reported G1 in the payload either), the P1 Balance
+    Source sensor must show a clear error instead of silently doing nothing.
+    """
+    entry = await _setup_local_entry(
+        hass,
+        options={
+            "mode": "balance",
+            "g1_source": "ha_sensor",
+            "g1_ha_entity_id": "sensor.does_not_exist",
+        },
+    )
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    payload = {**MOCK_LOCAL_PAYLOAD, "g1Data": {"powerDelivered": None, "powerReturned": None}}
+    coordinator.ingest_post("PP-001", payload)
+    await hass.async_block_till_done()
+
+    response = coordinator.get_response_for("PP-001")
+    assert response["setPoint"] == 0.0
+
+    state = hass.states.get("sensor.planetpod_pp_001_p1_balance_source")
+    assert state.state == "Can't balance: no P1 sensor"

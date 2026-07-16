@@ -21,12 +21,16 @@ from .const import (
     CONF_SOC_LOWER_LIMIT,
     CONF_SOC_UPPER_LIMIT,
     CONF_SOUND_MODE,
+    CONF_SPEED_SETPOINT_KW,
     DEFAULT_MODE,
     DEFAULT_SOC_LOWER_LIMIT,
     DEFAULT_SOC_UPPER_LIMIT,
     DEFAULT_SOUND_MODE,
+    DEFAULT_SPEED_SETPOINT_KW,
     DOMAIN,
     G1_SOURCE_HA_SENSOR,
+    MODE_BALANCE,
+    SPEED_SETPOINT_TIMEOUT_MINUTES,
 )
 from .mode_logic import compute_get_response
 from .pod_status import build_pod_status
@@ -72,6 +76,7 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
         self._last_message_at: dict[str, datetime] = {}
         self._last_requested_power_kw: dict[str, float] = {}
         self._pending_commands: dict[str, set[str]] = {}
+        self._speed_setpoint_updated_at: datetime | None = None
         self.async_set_updated_data({"pods": []})
 
     def trigger_command(self, serial: str, command: str) -> None:
@@ -103,6 +108,31 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
         """Recompute pod status after an option (SoC limits, sound mode, ...) changes."""
         self._rebuild()
 
+    def set_speed_setpoint(self, value: float) -> None:
+        """Write a new Speed Setpoint value and reset its expiry timer."""
+        new_options = {**self.entry.options, CONF_SPEED_SETPOINT_KW: value}
+        self.hass.config_entries.async_update_entry(self.entry, options=new_options)
+        self._speed_setpoint_updated_at = datetime.now(timezone.utc)
+        self._rebuild()
+
+    @property
+    def effective_speed_setpoint_kw(self) -> float:
+        """The Speed Setpoint to actually apply, or 0.0 if it has expired."""
+        if self._speed_setpoint_updated_at is None:
+            return DEFAULT_SPEED_SETPOINT_KW
+        age = datetime.now(timezone.utc) - self._speed_setpoint_updated_at
+        if age.total_seconds() > SPEED_SETPOINT_TIMEOUT_MINUTES * 60:
+            return DEFAULT_SPEED_SETPOINT_KW
+        return self.entry.options.get(CONF_SPEED_SETPOINT_KW, DEFAULT_SPEED_SETPOINT_KW)
+
+    @property
+    def speed_setpoint_active(self) -> bool:
+        """Whether the current Speed Setpoint is being applied (not expired/unset)."""
+        if self._speed_setpoint_updated_at is None:
+            return False
+        age = datetime.now(timezone.utc) - self._speed_setpoint_updated_at
+        return age.total_seconds() <= SPEED_SETPOINT_TIMEOUT_MINUTES * 60
+
     def ingest_post(self, serial: str, payload: dict[str, Any]) -> None:
         """Handle a POST /planetpod payload from one pod."""
         self._raw_payloads[serial] = payload
@@ -126,11 +156,16 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
             # a different concept, exposed separately via the Mode select
             # entity (select.py), not this field.
             g1_delivered, g1_returned = self._resolve_g1(serial)
+            no_p1 = g1_delivered is None and g1_returned is None
             status["balance"] = {
                 "source_label": self._g1_source_label(),
                 "power_delivered_kw": g1_delivered,
                 "power_returned_kw": g1_returned,
+                "error": "Can't balance: no P1 sensor" if (no_p1 and self.mode == MODE_BALANCE) else None,
             }
+            status["speed_setpoint_status"] = (
+                "Active" if self.speed_setpoint_active else "Expired (reverted to idle)"
+            )
             pods.append(status)
         self.async_set_updated_data({"pods": pods})
 
@@ -154,14 +189,11 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
 
         g1_delivered, g1_returned = self._resolve_g1(serial)
 
-        # speed_setpoint_kw is intentionally not passed -- Speed-mode
-        # scheduling (e.g. a configured schedule, or an EMHASS-derived plan)
-        # isn't implemented yet, so Speed mode currently always resolves to
-        # a 0 setpoint / idle status.
         response = compute_get_response(
             mode=self.mode,
             g1_power_delivered_kw=g1_delivered,
             g1_power_returned_kw=g1_returned,
+            speed_setpoint_kw=self.effective_speed_setpoint_kw,
         )
 
         set_point = response.get("setPoint", response.get("speed"))
