@@ -64,6 +64,18 @@ BUTTON_DESCRIPTIONS: tuple[PlanetpodButtonEntityDescription, ...] = (
         entity_category=EntityCategory.CONFIG,
     ),
     PlanetpodButtonEntityDescription(
+        key="unlock_bms",
+        name="Unlock BMS",
+        command="unlock_bms",
+        entity_category=EntityCategory.CONFIG,
+    ),
+    PlanetpodButtonEntityDescription(
+        key="bms_update",
+        name="BMS Update",
+        command="bms_update",
+        entity_category=EntityCategory.CONFIG,
+    ),
+    PlanetpodButtonEntityDescription(
         key="debug_on", name="Debug", command="debug_on", entity_category=EntityCategory.CONFIG
     ),
     PlanetpodButtonEntityDescription(

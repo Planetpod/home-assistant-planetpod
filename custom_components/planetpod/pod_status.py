@@ -121,4 +121,10 @@ def build_pod_status(
             "power_delivered_kw": g1_data.get("powerDelivered"),
             "power_returned_kw": g1_data.get("powerReturned"),
         },
+        # Not part of PodStatusResponse either -- the cloud REST API never
+        # exposes errorLogs, only local mode sees it directly on the raw POST
+        # (see PodDataV2/ErrorLog in orm-planetpod-v2's
+        # planetpod_post_v2_interface.ts). Each entry:
+        # {timestamp, errorCode, errorType, description, severity, errorGroup, startEnd}.
+        "error_logs": payload.get("errorLogs") or [],
     }

@@ -38,33 +38,40 @@ from .pod_status import build_pod_status
 
 _LOGGER = logging.getLogger(__name__)
 
-# One-shot command flags matching the fields planetpod_get.ts sends today:
-# Toggle_calibration, Reboot, TurnOffBMS, UnlockBMS/Unlock (SCU), Debug_on.
-# Standby isn't a real cloud toggle field (it's a Modus value) but is
-# offered here as an equivalent one-shot action pending a real design.
-ONE_SHOT_COMMANDS = (
-    "reboot",
-    "toggle_calibration",
-    "turn_off_bms",
-    "unlock_scu",
-    "debug_on",
-    "standby",
-)
-
-# Maps our internal command name to the JSON field the cloud/firmware
-# contract already uses, per planetpod_get.ts's response shape.
-_COMMAND_TO_RESPONSE_FIELD = {
+# One-shot command flags, matching planetpod_get.ts's real response shape
+# (verified against orm-planetpod-v2 and Planetpod-embedded/src/API.cpp):
+# - Reboot/Toggle_calibration/TurnOffBMS/UnlockBMS are ALWAYS present,
+#   default false (device_events of these types are read every GET).
+# - Unlock/Debug_on/bmsUpdate are OMITTED entirely unless true -- the cloud
+#   never sends them as false.
+# "standby" has no such field at all -- real cloud forces Modus="standby"
+# instead (see STANDBY_MODUS_OVERRIDE below), it isn't a boolean toggle.
+_ALWAYS_PRESENT_COMMANDS = {
     "reboot": "Reboot",
     "toggle_calibration": "Toggle_calibration",
     "turn_off_bms": "TurnOffBMS",
+    "unlock_bms": "UnlockBMS",
+}
+_CONDITIONAL_COMMANDS = {
     "unlock_scu": "Unlock",
     "debug_on": "Debug_on",
-    "standby": "Standby",
+    "bms_update": "bmsUpdate",
 }
+STANDBY_COMMAND = "standby"
+
+ONE_SHOT_COMMANDS = (
+    *_ALWAYS_PRESENT_COMMANDS,
+    *_CONDITIONAL_COMMANDS,
+    STANDBY_COMMAND,
+)
 
 
 def _build_command_flags(pending: set[str]) -> dict[str, bool]:
-    return {_COMMAND_TO_RESPONSE_FIELD[command]: True for command in pending}
+    flags = {field: command in pending for command, field in _ALWAYS_PRESENT_COMMANDS.items()}
+    flags.update(
+        {field: True for command, field in _CONDITIONAL_COMMANDS.items() if command in pending}
+    )
+    return flags
 
 
 class PlanetpodLocalCoordinator(DataUpdateCoordinator):
@@ -217,6 +224,14 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
         if serial not in self._raw_payloads:
             return None
 
+        pending = self._pending_commands.pop(serial, None) or set()
+
+        if STANDBY_COMMAND in pending:
+            # Real cloud behavior: standby overrides Modus entirely for this
+            # GET rather than being a boolean toggle field (there is no
+            # "Standby" field firmware parses) -- see planetpod_get.ts.
+            return {"Modus": "standby", **_build_command_flags(pending - {STANDBY_COMMAND})}
+
         g1_delivered, g1_returned = self._resolve_g1(serial)
 
         response = compute_get_response(
@@ -226,14 +241,11 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
             speed_setpoint_kw=self.effective_speed_setpoint_kw,
         )
 
-        set_point = response.get("setPoint", response.get("speed"))
-        if set_point is not None:
-            self._last_requested_power_kw[serial] = set_point
-            self._rebuild()
+        set_point = response["solarSmart"]["setpoint_kW"]
+        self._last_requested_power_kw[serial] = set_point
+        self._rebuild()
 
-        pending = self._pending_commands.pop(serial, None)
-        if pending:
-            response.update(_build_command_flags(pending))
+        response.update(_build_command_flags(pending))
 
         return response
 

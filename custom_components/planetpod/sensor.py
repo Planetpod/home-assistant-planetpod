@@ -219,6 +219,19 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
         value_fn=lambda pod: pod.get("raw_post", {}).get("received_at"),
         attr_fn=lambda pod: {"raw_payload": pod.get("raw_post", {}).get("payload")},
     ),
+    # Local-mode only: surfaces the SCU/BMS errorLogs field from the raw
+    # POST, which the cloud REST API never exposes. The state itself is the
+    # most recent error's description (or "None") so it's visible on the
+    # device page directly, with the full list as an attribute.
+    PlanetpodSensorEntityDescription(
+        key="last_error",
+        name="Last Error",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda pod: (
+            pod["error_logs"][-1]["description"] if pod.get("error_logs") else "None"
+        ),
+        attr_fn=lambda pod: {"error_logs": pod.get("error_logs", [])},
+    ),
 )
 
 

@@ -114,4 +114,5 @@ class PlanetpodLocalView(HomeAssistantView):
         if response is None:
             return web.Response(status=404, text=f"Unknown pod serial: {serial}")
 
+        _LOGGER.warning("PLANETPOD: GET /planetpod response for serial=%s: %s", serial, response)
         return web.json_response(response)
