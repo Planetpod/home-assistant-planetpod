@@ -44,8 +44,10 @@ _LOGGER = logging.getLogger(__name__)
 #   default false (device_events of these types are read every GET).
 # - Unlock/Debug_on/bmsUpdate are OMITTED entirely unless true -- the cloud
 #   never sends them as false.
-# "standby" has no such field at all -- real cloud forces Modus="standby"
-# instead (see STANDBY_MODUS_OVERRIDE below), it isn't a boolean toggle.
+# Standby is NOT here -- verified it's a persistent toggle (never
+# stamped/cleared like these are) achieved via solarSmart.setpoint_kW=0, not
+# a one-shot command or a "Modus: standby" wire value. Left out until it can
+# be a proper switch entity (see button.py's module docstring).
 _ALWAYS_PRESENT_COMMANDS = {
     "reboot": "Reboot",
     "toggle_calibration": "Toggle_calibration",
@@ -57,12 +59,10 @@ _CONDITIONAL_COMMANDS = {
     "debug_on": "Debug_on",
     "bms_update": "bmsUpdate",
 }
-STANDBY_COMMAND = "standby"
 
 ONE_SHOT_COMMANDS = (
     *_ALWAYS_PRESENT_COMMANDS,
     *_CONDITIONAL_COMMANDS,
-    STANDBY_COMMAND,
 )
 
 
@@ -74,6 +74,14 @@ def _build_command_flags(pending: set[str]) -> dict[str, bool]:
     return flags
 
 
+# Confirmed in firmware (API.cpp): these three bmsData fields are only
+# included in a POST when their value has changed since the pod's last send
+# (delta-throttled), unlike every other field. A naive full-overwrite of the
+# raw payload per POST would make State of Health/Total Cycles sensors
+# flicker to unknown on any POST where they legitimately didn't change.
+_DELTA_THROTTLED_BMS_FIELDS = ("soh", "cycleCount", "cycleBufferMah")
+
+
 class PlanetpodLocalCoordinator(DataUpdateCoordinator):
     """Holds latest per-pod state for one install, pushed from HTTP POSTs."""
 
@@ -81,6 +89,7 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
         super().__init__(hass, _LOGGER, name=DOMAIN, update_interval=None)
         self.entry = entry
         self._raw_payloads: dict[str, dict[str, Any]] = {}
+        self._last_known_bms_fields: dict[str, dict[str, Any]] = {}
         self._last_message_at: dict[str, datetime] = {}
         self._last_requested_power_kw: dict[str, float] = {}
         self._pending_commands: dict[str, set[str]] = {}
@@ -168,16 +177,43 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
 
     def ingest_post(self, serial: str, payload: dict[str, Any]) -> None:
         """Handle a POST /planetpod payload from one pod."""
+        bms_data = payload.get("bmsData") or {}
+        known = self._last_known_bms_fields.setdefault(serial, {})
+        for field in _DELTA_THROTTLED_BMS_FIELDS:
+            value = bms_data.get(field)
+            if value is not None:
+                known[field] = value
+
         self._raw_payloads[serial] = payload
         self._last_message_at[serial] = datetime.now(timezone.utc)
         self._rebuild()
+
+    def _with_last_known_bms_fields(self, serial: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Backfill delta-throttled bmsData fields with their last known value.
+
+        Only for feeding build_pod_status -- the raw_post/"Last POST
+        Received" attribute must stay genuinely raw for debugging accuracy.
+        """
+        known = self._last_known_bms_fields.get(serial)
+        if not known:
+            return payload
+        bms_data = payload.get("bmsData") or {}
+        merged_bms = dict(bms_data)
+        changed = False
+        for field, value in known.items():
+            if merged_bms.get(field) is None:
+                merged_bms[field] = value
+                changed = True
+        if not changed:
+            return payload
+        return {**payload, "bmsData": merged_bms}
 
     def _rebuild(self) -> None:
         pods = []
         for serial, payload in self._raw_payloads.items():
             status = build_pod_status(
                 serial,
-                payload,
+                self._with_last_known_bms_fields(serial, payload),
                 soc_upper_limit_pct=self.soc_upper_limit_pct,
                 soc_lower_limit_pct=self.soc_lower_limit_pct,
                 sound_mode=self.sound_mode,
@@ -226,12 +262,6 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
 
         pending = self._pending_commands.pop(serial, None) or set()
 
-        if STANDBY_COMMAND in pending:
-            # Real cloud behavior: standby overrides Modus entirely for this
-            # GET rather than being a boolean toggle field (there is no
-            # "Standby" field firmware parses) -- see planetpod_get.ts.
-            return {"Modus": "standby", **_build_command_flags(pending - {STANDBY_COMMAND})}
-
         g1_delivered, g1_returned = self._resolve_g1(serial)
 
         response = compute_get_response(
@@ -244,6 +274,19 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
         set_point = response["solarSmart"]["setpoint_kW"]
         self._last_requested_power_kw[serial] = set_point
         self._rebuild()
+
+        # Confirmed control-affecting on firmware (API.cpp), not informational:
+        # Min_SOC/Max_SOC are persisted into firmware's own SOC-limit storage
+        # (cloudSOCLimits.setValue, "persistent, no expiry"), and sameGroup is
+        # persisted to NVS and used by the local UDP mesh grouping logic.
+        # Omitting these means the SoC Upper/Lower Limit entities silently
+        # have no effect on the real pod at all.
+        response["Min_SOC"] = self.soc_lower_limit_pct
+        response["Max_SOC"] = self.soc_upper_limit_pct
+        # All pods on one HA install are treated as one grid group, matching
+        # the confirmed grid-wide mirroring pattern used elsewhere (mode/SOC
+        # limits); firmware's own un-configured default is also True.
+        response["sameGroup"] = True
 
         response.update(_build_command_flags(pending))
 

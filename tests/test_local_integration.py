@@ -232,8 +232,9 @@ async def test_command_buttons_are_config_category(hass: HomeAssistant):
         "button.planetpod_pp_001_calibration",
         "button.planetpod_pp_001_turn_off_bms",
         "button.planetpod_pp_001_unlock_scu",
+        "button.planetpod_pp_001_unlock_bms",
+        "button.planetpod_pp_001_bms_update",
         "button.planetpod_pp_001_debug",
-        "button.planetpod_pp_001_standby",
     ):
         entry_reg = registry.async_get(entity_id)
         assert entry_reg is not None, f"{entity_id} not found"
@@ -530,21 +531,47 @@ async def test_conditional_command_fields_omitted_unless_true(hass: HomeAssistan
     assert second["UnlockBMS"] is False
 
 
-async def test_standby_command_overrides_modus_entirely(hass: HomeAssistant):
-    """Standby has no real boolean field firmware parses -- pressing it must
-    force Modus="standby" for that one GET instead, matching real cloud
-    behavior, then clear back to normal solarSmart responses.
+async def test_get_response_includes_soc_limits_and_same_group(hass: HomeAssistant):
+    """Min_SOC/Max_SOC/sameGroup are confirmed control-affecting on firmware
+    (persisted into its own SOC-limit storage and NVS group setting), not
+    informational -- omitting them means the SoC Upper/Lower Limit entities
+    would silently have no effect on a real pod.
     """
-    entry = await _setup_local_entry(hass, options={"mode": "speed"})
+    entry = await _setup_local_entry(hass, options={"soc_upper_limit_pct": 90, "soc_lower_limit_pct": 15})
     coordinator = hass.data[DOMAIN][entry.entry_id]
     coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
     await hass.async_block_till_done()
 
-    coordinator.trigger_command("PP-001", "standby")
+    response = coordinator.get_response_for("PP-001")
+    assert response["Max_SOC"] == 90
+    assert response["Min_SOC"] == 15
+    assert response["sameGroup"] is True
 
-    first = coordinator.get_response_for("PP-001")
-    assert first["Modus"] == "standby"
-    assert "solarSmart" not in first
 
-    second = coordinator.get_response_for("PP-001")
-    assert second["Modus"] == "solarSmart"
+async def test_soh_and_cycle_count_survive_posts_that_omit_them(hass: HomeAssistant):
+    """Firmware only includes bmsData.soh/cycleCount/cycleBufferMah in a POST
+    when the value changed since the last send (delta-throttled) -- a naive
+    full-overwrite of the raw payload would flicker State of Health/Total
+    Cycles to unknown on every POST that doesn't repeat them.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)  # has soh=98, cycleCount=143
+    await hass.async_block_till_done()
+
+    payload_without_deltas = {
+        **MOCK_LOCAL_PAYLOAD,
+        "bmsData": {"socPct": 61, "avgTempC": 27.1},  # no soh/cycleCount this time
+    }
+    coordinator.ingest_post("PP-001", payload_without_deltas)
+    await hass.async_block_till_done()
+
+    soh_state = hass.states.get("sensor.planetpod_pp_001_state_of_health")
+    cycles_state = hass.states.get("sensor.planetpod_pp_001_total_cycles")
+    assert soh_state.state == "98"
+    assert cycles_state.state == "143"
+
+    # The raw diagnostic sensor must stay genuinely raw (no backfilled values).
+    last_post_state = hass.states.get("sensor.planetpod_pp_001_last_post_received")
+    assert "soh" not in last_post_state.attributes["raw_payload"]["bmsData"]
