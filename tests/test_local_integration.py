@@ -149,8 +149,10 @@ async def test_command_button_sets_one_shot_flag_on_next_get(hass: HomeAssistant
     first = coordinator.get_response_for("PP-001")
     assert first["Reboot"] is True
 
+    # Reboot is always present in the real contract (default false), not
+    # omitted -- it must revert to False on the next GET, not disappear.
     second = coordinator.get_response_for("PP-001")
-    assert "Reboot" not in second
+    assert second["Reboot"] is False
 
 
 async def test_balance_source_sensor_reflects_g1_config(hass: HomeAssistant):
@@ -275,8 +277,8 @@ async def test_speed_setpoint_drives_get_response(hass: HomeAssistant):
     coordinator.set_speed_setpoint(2.5)
 
     response = coordinator.get_response_for("PP-001")
-    assert response["speed"] == 2.5
-    assert response["status"] == "charge"
+    assert response["Modus"] == "solarSmart"
+    assert response["solarSmart"] == {"subMode": "speed", "setpoint_kW": 2.5}
 
     state = hass.states.get("sensor.planetpod_pp_001_speed_setpoint_status")
     assert state.state == "Active"
@@ -297,8 +299,7 @@ async def test_speed_setpoint_expires_to_idle(hass: HomeAssistant):
     await hass.async_block_till_done()
 
     response = coordinator.get_response_for("PP-001")
-    assert response["speed"] == 0.0
-    assert response["status"] == "idle"
+    assert response["solarSmart"] == {"subMode": "speed", "setpoint_kW": 0.0}
 
     state = hass.states.get("sensor.planetpod_pp_001_speed_setpoint_status")
     assert state.state == "Expired (reverted to idle)"
@@ -342,7 +343,7 @@ async def test_balance_source_sensor_shows_no_p1_error(hass: HomeAssistant):
     await hass.async_block_till_done()
 
     response = coordinator.get_response_for("PP-001")
-    assert response["setPoint"] == 0.0
+    assert response["solarSmart"]["setpoint_kW"] == 0.0
 
     state = hass.states.get("sensor.planetpod_pp_001_p1_balance_source")
     assert state.state == "Can't balance: no P1 sensor"
@@ -399,8 +400,7 @@ async def test_editing_speed_setpoint_number_does_not_send_until_button_pressed(
 
     assert coordinator.speed_setpoint_active is True
     response = coordinator.get_response_for("PP-001")
-    assert response["speed"] == 2.0
-    assert response["status"] == "charge"
+    assert response["solarSmart"] == {"subMode": "speed", "setpoint_kW": 2.0}
 
 
 async def test_send_speed_command_button_unavailable_unless_mode_is_speed(
@@ -442,3 +442,109 @@ async def test_last_post_received_sensor_exposes_raw_payload(hass: HomeAssistant
     entry_reg = registry.async_get("sensor.planetpod_pp_001_last_post_received")
     assert entry_reg is not None
     assert entry_reg.entity_category == EntityCategory.DIAGNOSTIC
+
+
+async def test_last_error_sensor_reflects_errorlogs_from_post(hass: HomeAssistant):
+    """The Last Error sensor must surface the raw POST's errorLogs (SCU/BMS
+    fault data), which the cloud REST API never exposes -- this is
+    local-mode-only visibility into battery faults.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+    state = hass.states.get("sensor.planetpod_pp_001_last_error")
+    assert state.state == "None"
+
+    payload_with_error = {
+        **MOCK_LOCAL_PAYLOAD,
+        "errorLogs": [
+            {
+                "timestamp": "2026-07-16T13:49:26.000Z",
+                "errorCode": "E042",
+                "errorType": "bms",
+                "description": "Cell overvoltage detected",
+                "severity": 2,
+                "errorGroup": "battery",
+                "startEnd": 1,
+            }
+        ],
+    }
+    coordinator.ingest_post("PP-001", payload_with_error)
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.planetpod_pp_001_last_error")
+    assert state.state == "Cell overvoltage detected"
+    assert state.attributes["error_logs"][0]["errorCode"] == "E042"
+
+    registry = er.async_get(hass)
+    entry_reg = registry.async_get("sensor.planetpod_pp_001_last_error")
+    assert entry_reg is not None
+    assert entry_reg.entity_category == EntityCategory.DIAGNOSTIC
+
+
+async def test_always_present_command_fields_default_false(hass: HomeAssistant):
+    """Reboot/Toggle_calibration/TurnOffBMS/UnlockBMS must always be present
+    (default False) in every GET response, matching the real cloud contract --
+    not omitted like Unlock/Debug_on/bmsUpdate.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    response = coordinator.get_response_for("PP-001")
+    assert response["Reboot"] is False
+    assert response["Toggle_calibration"] is False
+    assert response["TurnOffBMS"] is False
+    assert response["UnlockBMS"] is False
+    assert "Unlock" not in response
+    assert "Debug_on" not in response
+    assert "bmsUpdate" not in response
+
+
+async def test_conditional_command_fields_omitted_unless_true(hass: HomeAssistant):
+    """Unlock/Debug_on/bmsUpdate must be OMITTED when not triggered, and
+    present as True (not False) exactly once, matching the real cloud
+    contract's conditional-spread behavior.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    coordinator.trigger_command("PP-001", "debug_on")
+    coordinator.trigger_command("PP-001", "unlock_bms")
+    coordinator.trigger_command("PP-001", "bms_update")
+
+    first = coordinator.get_response_for("PP-001")
+    assert first["Debug_on"] is True
+    assert first["bmsUpdate"] is True
+    # unlock_bms is an always-present field, so it reverts to False, not omitted.
+    assert first["UnlockBMS"] is True
+
+    second = coordinator.get_response_for("PP-001")
+    assert "Debug_on" not in second
+    assert "bmsUpdate" not in second
+    assert second["UnlockBMS"] is False
+
+
+async def test_standby_command_overrides_modus_entirely(hass: HomeAssistant):
+    """Standby has no real boolean field firmware parses -- pressing it must
+    force Modus="standby" for that one GET instead, matching real cloud
+    behavior, then clear back to normal solarSmart responses.
+    """
+    entry = await _setup_local_entry(hass, options={"mode": "speed"})
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    coordinator.trigger_command("PP-001", "standby")
+
+    first = coordinator.get_response_for("PP-001")
+    assert first["Modus"] == "standby"
+    assert "solarSmart" not in first
+
+    second = coordinator.get_response_for("PP-001")
+    assert second["Modus"] == "solarSmart"
