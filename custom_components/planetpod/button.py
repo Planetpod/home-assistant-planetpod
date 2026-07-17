@@ -1,9 +1,19 @@
 """Button platform for Planetpod integration (local mode only).
 
 One-shot device actions -- Reboot, Toggle Calibration, Turn Off BMS,
-Unlock SCU, Debug, Standby -- matching the toggle fields planetpod_get.ts
-already sends today. These are per-pod, not install-level, since each
-command targets one specific battery.
+Unlock SCU, Unlock BMS, BMS Update, Debug -- matching the toggle fields
+planetpod_get.ts already sends today. These are per-pod, not install-level,
+since each command targets one specific battery.
+
+Standby is intentionally NOT implemented here yet: verified against the real
+cloud (planetpod_get.ts) and firmware (ModeManager.cpp/API.cpp) that standby
+is a PERSISTENT toggle (the device-event is never stamped/cleared like the
+other one-shot commands are), achieved by forcing solarSmart.setpoint_kW=0 on
+every GET while active -- not a one-shot command, and not a "Modus: standby"
+wire value (firmware never checks for that; the real Modus collapses to
+"solarSmart" regardless). A one-shot button here would neither send the
+right data nor behave the right way, so it's left out until it can be a
+proper switch entity.
 """
 from __future__ import annotations
 
@@ -77,9 +87,6 @@ BUTTON_DESCRIPTIONS: tuple[PlanetpodButtonEntityDescription, ...] = (
     ),
     PlanetpodButtonEntityDescription(
         key="debug_on", name="Debug", command="debug_on", entity_category=EntityCategory.CONFIG
-    ),
-    PlanetpodButtonEntityDescription(
-        key="standby", name="Standby", command="standby", entity_category=EntityCategory.CONFIG
     ),
 )
 
