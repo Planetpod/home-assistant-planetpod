@@ -34,6 +34,7 @@ CONF_G1_HA_ENTITY_ID = "g1_ha_entity_id"
 CONF_MODE = "mode"
 MODE_BALANCE = "balance"
 MODE_SPEED = "speed"
+MODE_STANDBY = "standby"
 DEFAULT_MODE = MODE_BALANCE
 
 CONF_SPEED_SETPOINT_KW = "speed_setpoint_kw"

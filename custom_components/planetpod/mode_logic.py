@@ -25,12 +25,20 @@ planetpod_get.ts`) directly:
   control and should not be treated as verified. It's also currently
   unreachable in cloud production: `sub_mode` is read but never written
   anywhere in orm-planetpod-v2, so this code path never actually fires there.
+- "standby" is an HA-side-only concept (confirmed to match how the real
+  cloud's own standby feature works): firmware has no wire-level "standby"
+  subMode at all -- anything other than exactly "balance" falls through to
+  its "speed" branch (`API.cpp:1352`). So standby is sent as
+  `subMode: "speed", setpoint_kW: 0.0` -- a persistent zero-output request,
+  not the pod's own separate internal hardware Mode::STANDBY (which fires
+  autonomously from lost-cloud-connection/error conditions and isn't
+  remotely controllable via this endpoint at all).
 """
 from __future__ import annotations
 
 from typing import Any, Literal
 
-Mode = Literal["balance", "speed"]
+Mode = Literal["balance", "speed", "standby"]
 
 
 def compute_get_response(
@@ -54,12 +62,17 @@ def compute_get_response(
     if mode == "balance":
         # PLACEHOLDER FORMULA -- see module docstring.
         setpoint_kw = round(net_export_kw, 3) if net_export_kw is not None else 0.0
+        wire_sub_mode = "balance"
+    elif mode == "standby":
+        setpoint_kw = 0.0
+        wire_sub_mode = "speed"
     else:  # speed
         setpoint_kw = speed_setpoint_kw or 0.0
+        wire_sub_mode = "speed"
 
     return {
         "Modus": "solarSmart",
-        "solarSmart": {"subMode": mode, "setpoint_kW": setpoint_kw},
+        "solarSmart": {"subMode": wire_sub_mode, "setpoint_kW": setpoint_kw},
         "Actual_power_delivered_p1": (
             str(g1_power_delivered_kw) if g1_power_delivered_kw is not None else None
         ),
