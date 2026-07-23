@@ -1,19 +1,24 @@
 """Button platform for Planetpod integration (local mode only).
 
 One-shot device actions -- Reboot, Toggle Calibration, Turn Off BMS,
-Unlock SCU, Unlock BMS, BMS Update, Debug -- matching the toggle fields
-planetpod_get.ts already sends today. These are per-pod, not install-level,
-since each command targets one specific battery.
+Unlock SCU, BMS Update, Debug -- matching the toggle fields planetpod_get.ts
+already sends today. These are per-pod, not install-level, since each
+command targets one specific battery.
 
-Standby is intentionally NOT implemented here yet: verified against the real
+No "Unlock BMS" button on purpose (removed): the UnlockBMS field is still
+always sent in every GET response (default False, per the real contract --
+see coordinator_local.py's _ALWAYS_PRESENT_COMMANDS), it's just not
+manually triggerable from the HA UI.
+
+Standby is intentionally NOT implemented here: verified against the real
 cloud (planetpod_get.ts) and firmware (ModeManager.cpp/API.cpp) that standby
 is a PERSISTENT toggle (the device-event is never stamped/cleared like the
 other one-shot commands are), achieved by forcing solarSmart.setpoint_kW=0 on
 every GET while active -- not a one-shot command, and not a "Modus: standby"
 wire value (firmware never checks for that; the real Modus collapses to
-"solarSmart" regardless). A one-shot button here would neither send the
-right data nor behave the right way, so it's left out until it can be a
-proper switch entity.
+"solarSmart" regardless). It's implemented instead as a third option on the
+Mode select entity (select.py) since it's naturally persistent there, not a
+one-shot button.
 """
 from __future__ import annotations
 
@@ -71,12 +76,6 @@ BUTTON_DESCRIPTIONS: tuple[PlanetpodButtonEntityDescription, ...] = (
         key="unlock_scu",
         name="Unlock SCU",
         command="unlock_scu",
-        entity_category=EntityCategory.CONFIG,
-    ),
-    PlanetpodButtonEntityDescription(
-        key="unlock_bms",
-        name="Unlock BMS",
-        command="unlock_bms",
         entity_category=EntityCategory.CONFIG,
     ),
     PlanetpodButtonEntityDescription(

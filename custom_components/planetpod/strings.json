@@ -81,7 +81,8 @@
         "name": "Mode",
         "state": {
           "balance": "Balance",
-          "speed": "Speed"
+          "speed": "Speed",
+          "standby": "Standby"
         }
       }
     },

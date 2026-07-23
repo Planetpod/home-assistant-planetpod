@@ -232,7 +232,6 @@ async def test_command_buttons_are_config_category(hass: HomeAssistant):
         "button.planetpod_pp_001_calibration",
         "button.planetpod_pp_001_turn_off_bms",
         "button.planetpod_pp_001_unlock_scu",
-        "button.planetpod_pp_001_unlock_bms",
         "button.planetpod_pp_001_bms_update",
         "button.planetpod_pp_001_debug",
     ):
@@ -575,3 +574,29 @@ async def test_soh_and_cycle_count_survive_posts_that_omit_them(hass: HomeAssist
     # The raw diagnostic sensor must stay genuinely raw (no backfilled values).
     last_post_state = hass.states.get("sensor.planetpod_pp_001_last_post_received")
     assert "soh" not in last_post_state.attributes["raw_payload"]["bmsData"]
+
+
+async def test_standby_mode_forces_zero_setpoint(hass: HomeAssistant):
+    """Standby mode must force a persistent 0kW/idle request every GET --
+    sent as subMode="speed"/setpoint_kW=0.0 since firmware has no wire-level
+    "standby" subMode (anything other than exactly "balance" falls through
+    to its speed branch) -- confirmed this matches how the real cloud's own
+    standby feature works too (just holding the setpoint at 0).
+    """
+    entry = await _setup_local_entry(hass, options={"mode": "speed"})
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    coordinator.set_speed_setpoint(2.5)
+    response = coordinator.get_response_for("PP-001")
+    assert response["solarSmart"]["setpoint_kW"] == 2.5
+
+    hass.config_entries.async_update_entry(entry, options={**entry.options, "mode": "standby"})
+    coordinator.async_options_updated()
+    await hass.async_block_till_done()
+
+    # Standby must override even a still-active, non-expired Speed Setpoint.
+    response = coordinator.get_response_for("PP-001")
+    assert response["Modus"] == "solarSmart"
+    assert response["solarSmart"] == {"subMode": "speed", "setpoint_kW": 0.0}
