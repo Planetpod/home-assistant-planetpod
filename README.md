@@ -77,6 +77,12 @@ One device is created per battery (identified by serial number). The following s
 | Total Cycles | — | Number of full charge/discharge cycles the battery has completed, counted by the BMS. | integer ≥ 0 |
 | SoC Upper Limit | % | Maximum charge level the pod will charge to, as configured in the app. Defaults to 85% if not set. | 0 – 100 |
 | SoC Lower Limit | % | Minimum charge level the pod will discharge to, as configured in the app. Defaults to 20% if not set. | 0 – 100 |
+| G1 Solar Power | kW | Solar production power, from the pod's G1 module or a standalone P1 meter — null if no G1/P1 device is present. | numeric, ≥ 0 |
+| G1 Raw Solar Current | A | Raw, unfiltered solar production current reading. | numeric |
+| G1 Solar Phase | — | Number of phases the solar installation is wired across, as configured for this grid. | `single`, `three` |
+| G1 Grid Import Power | kW | Power currently being drawn from the grid. | numeric, ≥ 0 |
+| G1 Grid Export Power | kW | Power currently being exported to the grid (e.g. solar surplus). | numeric, ≥ 0 |
+| G1 House Usage Power | kW | Total household power consumption, derived from solar + net grid flow − battery power. | numeric |
 
 ## Sensors showing "Unknown"
 
@@ -88,6 +94,7 @@ Some sensors may show **Unknown** until the hardware has operated for a period o
 | **Total Cycles** | Populated after a pod (re)boot |
 | **AC Voltage** | Reported by the pod's inverters when Relay Status is `230_ON` — `0` if inverters have not sent data yet, null if inverters are OFF |
 | **Requested Power Received by Pod** | Only non-null when the pod is actively executing a power command — null at idle is expected |
+| **G1 Solar Power / G1 Raw Solar Current / G1 Solar Phase / G1 Grid Import Power / G1 Grid Export Power / G1 House Usage Power** | Only populated for pods with a G1 module or a standalone P1 meter reporting solar/grid data — stays Unknown for pods without one |
 
 ## Token expiry & re-authentication
 
