@@ -58,6 +58,14 @@ def mock_grid_payload() -> dict[str, Any]:
                     "avg_ac_voltage_v": 230,
                     "relay_status": "230_ON",
                 },
+                "g1": {
+                    "solar_power_kw": 1.2,
+                    "raw_solar_current_a": 5.2,
+                    "solar_phase": "single",
+                    "grid_import_power_kw": 0.3,
+                    "grid_export_power_kw": 0.0,
+                    "house_usage_power_kw": 1.5,
+                },
             }
         ],
     }
