@@ -1,8 +1,11 @@
 # Home Assistant Planetpod Integration
 
-## Local Mode (WIP — `feat/localMode` branch)
+Monitor and control your Planetpod solar battery from Home Assistant. Two connection types are available, chosen when you add the integration:
 
-Monitor your Planetpod solar battery from Home Assistant. The integration polls the Planetpod cloud API every 60 seconds — sensor data is routed through Planetpod's servers, not read directly from the hardware on your local network.
+- **Cloud** — sensor data is routed through Planetpod's servers via the Open API, polled every 60 seconds.
+- **Local (WIP — `feat/localMode` branch)** — the pod is pointed at Home Assistant's own network instead of Planetpod's cloud, and pushes telemetry directly to a local HTTP endpoint HA exposes (`/planetpod`). There is no cloud round-trip: state updates the instant the pod POSTs, and commands (mode, SoC limits, speed setpoint, one-shot actions like reboot/calibration) are picked up on the pod's next GET.
+
+Both connection types expose the same sensors below; Local mode additionally exposes the control entities described in [Local mode setup](#local-mode-setup).
 
 You can find the Planetpod manual with more information here: https://drive.google.com/file/d/1IeO2Q0d3dYZvWA1crQhpNoZgeBQ3qnKK/view
 
@@ -10,9 +13,10 @@ You can find the Planetpod manual with more information here: https://drive.goog
 
 - Home Assistant 2024.4.0 or later
 - A Planetpod account with an active battery
-- A Planetpod Open API token (generated in the app)
+- **Cloud mode:** a Planetpod Open API token (generated in the app)
+- **Local mode:** the pod reachable on the same network as Home Assistant, and Home Assistant's HTTP integration enabled (on by default)
 
-## Generating an API token
+## Generating an API token (Cloud mode)
 
 1. Open the Planetpod app
 2. Go to **Instellingen → Planetpod beheer**
@@ -22,6 +26,17 @@ You can find the Planetpod manual with more information here: https://drive.goog
 6. The token starts with `pp_` and is valid for 1 year
 
 > Generating a new token revokes the previous one. If you rotate the token, Home Assistant will show a re-authentication banner — enter the new token there.
+
+## Local mode setup
+
+During setup, choose **Local** as the connection type instead of pasting a token. Home Assistant registers a local HTTP view at `/planetpod` (GET for pod commands, POST for pod telemetry) and waits for the pod to start sending data to it — point the pod's local endpoint configuration at your Home Assistant instance's LAN address.
+
+Once a pod has POSTed at least once, its device and sensors appear automatically. Local mode additionally exposes:
+
+- **Mode** select entity (e.g. Balance, Speed) and **SoC Upper/Lower Limit** controls, sent to the pod on its next GET
+- **Speed Setpoint** (kW) and **Speed Setpoint Duration**, staged then applied via a "Send Speed Command" button
+- One-shot command buttons: Reboot, Toggle Calibration, Turn Off BMS, and (conditionally) Unlock SCU / Debug On / BMS Update
+- A **Balance** grid-power source, using either the pod's own reported P1 data or an existing Home Assistant P1/DSMR sensor you select during setup
 
 ## Step 1: Via HACS (Recommended)
 
@@ -46,14 +61,14 @@ Then in HACS, click **Download**, confirm, and restart Home Assistant.
 
 [![Open your Home Assistant instance and start setting up the Planetpod integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=planetpod)
 
-Paste your `pp_` token and confirm.
+Choose **Cloud** and paste your `pp_` token, or choose **Local** and follow the [local mode setup](#local-mode-setup) steps above.
 
 <details>
 <summary>Manual steps (if the button doesn't work)</summary>
 
 1. Go to **Settings → Devices & Services → Add Integration**
 2. Search for **Planetpod**
-3. Paste your `pp_` token and confirm
+3. Choose **Cloud** (paste your `pp_` token) or **Local**
 
 </details>
 
@@ -99,7 +114,7 @@ Some sensors may show **Unknown** until the hardware has operated for a period o
 | **Requested Power Received by Pod** | Only non-null when the pod is actively executing a power command — null at idle is expected |
 | **G1 Solar Power / G1 Raw Solar Current / G1 Solar Phase / G1 Grid Import Power / G1 Grid Export Power** | Only populated for pods with a G1 module or a standalone P1 meter reporting solar/grid data — stays Unknown for pods without one |
 
-## Token expiry & re-authentication
+## Token expiry & re-authentication (Cloud mode)
 
 Tokens expire after 1 year by default. When a token expires or is revoked, Home Assistant will display a **Re-authenticate** banner on the integration. Tap it, enter a new token generated from the app, and the integration resumes automatically.
 
