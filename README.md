@@ -57,7 +57,7 @@ Paste your `pp_` token and confirm.
 
 ## Sensors
 
-One device is created per battery (identified by serial number). If an Energy Pulse (G1) is paired with the battery, its sensors are included on that same device — each battery supports at most one Energy Pulse. The following sensors are available:
+One device is created per battery (identified by serial number). Energy Pulse (G1) data is included on the same device; multiple Energy Pulses are not supported. The following sensors are available:
 
 | Sensor | Source | Unit | Description | Possible values |
 |---|---|---|---|---|
