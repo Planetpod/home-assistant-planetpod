@@ -214,14 +214,6 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda pod: pod["g1"]["grid_export_power_kw"],
     ),
-    PlanetpodSensorEntityDescription(
-        key="g1_house_usage_power_kw",
-        name="G1 House Usage Power",
-        native_unit_of_measurement=UnitOfPower.KILO_WATT,
-        device_class=SensorDeviceClass.POWER,
-        state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda pod: pod["g1"]["house_usage_power_kw"],
-    ),
 )
 
 

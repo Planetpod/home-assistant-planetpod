@@ -64,7 +64,6 @@ def mock_grid_payload() -> dict[str, Any]:
                     "solar_phase": "single",
                     "grid_import_power_kw": 0.3,
                     "grid_export_power_kw": 0.0,
-                    "house_usage_power_kw": 1.5,
                 },
             }
         ],
