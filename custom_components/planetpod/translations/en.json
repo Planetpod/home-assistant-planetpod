@@ -112,6 +112,13 @@
           "230_OFF": "230_OFF"
         }
       },
+      "g1_solar_phase": {
+        "name": "G1 Solar Phase",
+        "state": {
+          "single": "Single phase",
+          "three": "Three phase"
+        }
+      },
       "total_cycles": {
         "name": "Total Cycles"
       },
