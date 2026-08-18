@@ -94,6 +94,12 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
         self._last_requested_power_kw: dict[str, float] = {}
         self._pending_commands: dict[str, set[str]] = {}
         self._speed_setpoint_expires_at: datetime | None = None
+        # Snapshot of CONF_SPEED_SETPOINT_KW taken at the moment
+        # send_speed_command() last ran -- effective_speed_setpoint_kw must
+        # read this, NOT the live option, otherwise staging a new value
+        # while a previous command is still active leaks through immediately
+        # without send_speed_command() ever being called again.
+        self._sent_speed_setpoint_kw: float = DEFAULT_SPEED_SETPOINT_KW
         self.async_set_updated_data({"pods": []})
 
     def trigger_command(self, serial: str, command: str) -> None:
@@ -155,7 +161,15 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
 
     def send_speed_command(self) -> None:
         """Apply the currently staged Speed Setpoint, active for
-        speed_setpoint_duration_min from now."""
+        speed_setpoint_duration_min from now.
+
+        Snapshots the staged value into _sent_speed_setpoint_kw so a later
+        stage_speed_setpoint() call (without a matching send) can never
+        change what's actually being applied -- and fully overwrites any
+        still-active previous command, no queueing."""
+        self._sent_speed_setpoint_kw = self.entry.options.get(
+            CONF_SPEED_SETPOINT_KW, DEFAULT_SPEED_SETPOINT_KW
+        )
         self._speed_setpoint_expires_at = datetime.now(timezone.utc) + timedelta(
             minutes=self.speed_setpoint_duration_min
         )
@@ -166,7 +180,7 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
         """The Speed Setpoint to actually apply, or 0.0 if its duration has elapsed."""
         if not self.speed_setpoint_active:
             return DEFAULT_SPEED_SETPOINT_KW
-        return self.entry.options.get(CONF_SPEED_SETPOINT_KW, DEFAULT_SPEED_SETPOINT_KW)
+        return self._sent_speed_setpoint_kw
 
     @property
     def speed_setpoint_active(self) -> bool:

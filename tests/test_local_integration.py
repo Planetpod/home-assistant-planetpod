@@ -408,6 +408,60 @@ async def test_editing_speed_setpoint_number_does_not_send_until_button_pressed(
     assert response["solarSmart"] == {"subMode": "speed", "setpoint_kW": 2.0}
 
 
+async def test_staging_new_setpoint_while_active_does_not_leak_until_send(
+    hass: HomeAssistant,
+):
+    """Staging a new Speed Setpoint while a previous command is still
+    active must NOT change what's applied until "Send Speed Command" is
+    pressed again -- effective_speed_setpoint_kw must reflect the value that
+    was active at the last send, not whatever is currently staged.
+    """
+    entry = await _setup_local_entry(hass, options={"mode": "speed"})
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    coordinator.set_speed_setpoint(2.0)
+    assert coordinator.speed_setpoint_active is True
+    assert coordinator.effective_speed_setpoint_kw == 2.0
+
+    # Stage a new value only -- do NOT press "Send Speed Command" again.
+    coordinator.stage_speed_setpoint(-1.0)
+
+    # Still active from the first send, and must still apply 2.0, not -1.0.
+    assert coordinator.speed_setpoint_active is True
+    assert coordinator.effective_speed_setpoint_kw == 2.0
+    response = coordinator.get_response_for("PP-001")
+    assert response["solarSmart"] == {"subMode": "speed", "setpoint_kW": 2.0}
+
+    # Now actually send -- the staged -1.0 takes over, and immediately.
+    coordinator.send_speed_command()
+    assert coordinator.effective_speed_setpoint_kw == -1.0
+
+
+async def test_sending_new_setpoint_while_active_overwrites_not_queues(
+    hass: HomeAssistant,
+):
+    """A second "send" while a previous command is still active must fully
+    replace it -- no queueing of the old command's remaining duration.
+    """
+    entry = await _setup_local_entry(hass, options={"mode": "speed"})
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    coordinator.set_speed_setpoint_duration(5)
+    coordinator.set_speed_setpoint(2.0)
+    first_expiry = coordinator._speed_setpoint_expires_at
+
+    coordinator.set_speed_setpoint_duration(10)
+    coordinator.set_speed_setpoint(-1.0)
+
+    assert coordinator.effective_speed_setpoint_kw == -1.0
+    assert coordinator._speed_setpoint_expires_at != first_expiry
+    assert coordinator._speed_setpoint_expires_at > first_expiry
+
+
 async def test_send_speed_command_button_unavailable_unless_mode_is_speed(
     hass: HomeAssistant,
 ):
