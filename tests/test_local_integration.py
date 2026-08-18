@@ -231,13 +231,18 @@ async def test_command_buttons_are_config_category(hass: HomeAssistant):
         "button.planetpod_pp_001_reboot",
         "button.planetpod_pp_001_calibration",
         "button.planetpod_pp_001_turn_off_bms",
-        "button.planetpod_pp_001_unlock_scu",
-        "button.planetpod_pp_001_bms_update",
-        "button.planetpod_pp_001_debug",
     ):
         entry_reg = registry.async_get(entity_id)
         assert entry_reg is not None, f"{entity_id} not found"
         assert entry_reg.entity_category == EntityCategory.CONFIG
+
+    # Unlock SCU/BMS Update/Debug are deliberately not exposed as HA buttons.
+    for entity_id in (
+        "button.planetpod_pp_001_unlock_scu",
+        "button.planetpod_pp_001_bms_update",
+        "button.planetpod_pp_001_debug",
+    ):
+        assert registry.async_get(entity_id) is None, f"{entity_id} should not exist"
 
     # Mode/SoC must stay in the primary Controls section (no category).
     for entity_id in (

@@ -1,14 +1,16 @@
 """Button platform for Planetpod integration (local mode only).
 
-One-shot device actions -- Reboot, Toggle Calibration, Turn Off BMS,
-Unlock SCU, BMS Update, Debug -- matching the toggle fields planetpod_get.ts
-already sends today. These are per-pod, not install-level, since each
-command targets one specific battery.
+One-shot device actions exposed to HA -- Reboot, Toggle Calibration, Turn
+Off BMS -- matching a subset of the toggle fields planetpod_get.ts already
+sends today. These are per-pod, not install-level, since each command
+targets one specific battery.
 
-No "Unlock BMS" button on purpose (removed): the UnlockBMS field is still
-always sent in every GET response (default False, per the real contract --
-see coordinator_local.py's _ALWAYS_PRESENT_COMMANDS), it's just not
-manually triggerable from the HA UI.
+Deliberately NOT exposed as HA buttons: Unlock SCU, BMS Update, Debug,
+Unlock BMS. These remain part of the real wire contract (coordinator_local.py
+still sends them correctly, e.g. UnlockBMS's default False via
+_ALWAYS_PRESENT_COMMANDS) but are considered too sensitive/rare to offer as
+a one-tap local HA action -- triggering them should go through Planetpod
+support/the app, not a local automation.
 
 Standby is intentionally NOT implemented here: verified against the real
 cloud (planetpod_get.ts) and firmware (ModeManager.cpp/API.cpp) that standby
@@ -71,21 +73,6 @@ BUTTON_DESCRIPTIONS: tuple[PlanetpodButtonEntityDescription, ...] = (
         name="Turn Off BMS",
         command="turn_off_bms",
         entity_category=EntityCategory.CONFIG,
-    ),
-    PlanetpodButtonEntityDescription(
-        key="unlock_scu",
-        name="Unlock SCU",
-        command="unlock_scu",
-        entity_category=EntityCategory.CONFIG,
-    ),
-    PlanetpodButtonEntityDescription(
-        key="bms_update",
-        name="BMS Update",
-        command="bms_update",
-        entity_category=EntityCategory.CONFIG,
-    ),
-    PlanetpodButtonEntityDescription(
-        key="debug_on", name="Debug", command="debug_on", entity_category=EntityCategory.CONFIG
     ),
 )
 
