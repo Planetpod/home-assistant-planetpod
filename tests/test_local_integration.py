@@ -436,6 +436,25 @@ async def test_balance_source_sensor_shows_no_p1_error(hass: HomeAssistant):
     assert state.state == "Can't balance: no P1 sensor"
 
 
+async def test_soc_limit_sliders_have_5_to_100_bounds(hass: HomeAssistant):
+    """SoC Upper/Lower Limit sliders must never allow a value below 5% --
+    a battery-safety floor -- and must cap at 100%.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    for entity_id in (
+        "number.planetpod_pp_001_soc_upper_limit",
+        "number.planetpod_pp_001_soc_lower_limit",
+    ):
+        state = hass.states.get(entity_id)
+        assert state is not None, f"{entity_id} not found"
+        assert state.attributes["min"] == 5
+        assert state.attributes["max"] == 100
+
+
 async def test_speed_setpoint_unavailable_unless_mode_is_speed(hass: HomeAssistant):
     """The Speed Setpoint number entity must be unavailable (grayed out)
     whenever Mode isn't Speed -- it has no effect in Balance mode, so it
