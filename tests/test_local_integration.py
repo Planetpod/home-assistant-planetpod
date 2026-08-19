@@ -534,13 +534,90 @@ async def test_last_error_sensor_reflects_errorlogs_from_post(hass: HomeAssistan
     await hass.async_block_till_done()
 
     state = hass.states.get("sensor.planetpod_pp_001_last_error")
-    assert state.state == "Cell overvoltage detected"
+    assert state.state == "[battery] E042 (bms): Cell overvoltage detected"
     assert state.attributes["error_logs"][0]["errorCode"] == "E042"
 
     registry = er.async_get(hass)
     entry_reg = registry.async_get("sensor.planetpod_pp_001_last_error")
     assert entry_reg is not None
     assert entry_reg.entity_category == EntityCategory.DIAGNOSTIC
+
+
+async def test_last_error_sensor_skips_empty_fields_when_concatenating(
+    hass: HomeAssistant,
+):
+    """Some firmware ErrorInfoList entries (e.g. E405/lost cloud connection)
+    ship with an empty `description` (and often an empty `errorGroup` too)
+    -- the sensor must skip whichever fields are empty rather than leaving
+    stray separators or going blank.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+
+    payload_with_error = {
+        **MOCK_LOCAL_PAYLOAD,
+        "errorLogs": [
+            {
+                "timestamp": "2026-07-16T13:49:26.000Z",
+                "errorCode": "E405",
+                "errorType": "Lost cloud connection",
+                "description": "",
+                "severity": 3,
+                "errorGroup": "",
+                "startEnd": 1,
+            }
+        ],
+    }
+    coordinator.ingest_post("PP-001", payload_with_error)
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.planetpod_pp_001_last_error")
+    assert state.state == "[ ] E405 (Lost cloud connection)"
+
+
+async def test_last_error_sensor_shows_all_errors_newest_first(
+    hass: HomeAssistant,
+):
+    """One POST can legitimately carry more than one error at once -- the
+    sensor must show all of them, sorted newest first by timestamp (not
+    array position: firmware serializes errorLogs from a
+    std::unordered_map, so JSON array order is NOT guaranteed to be
+    chronological -- confirmed with a real payload where an older E405 was
+    last and a newer E402 was first).
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+
+    payload_with_errors = {
+        **MOCK_LOCAL_PAYLOAD,
+        "errorLogs": [
+            {
+                "severity": 1,
+                "startEnd": 0,
+                "errorCode": "E402",
+                "errorType": "Reboot",
+                "timestamp": "2026-08-19 08:06:27",
+                "errorGroup": "warning",
+                "description": "Had a reboot, reason: 05",
+            },
+            {
+                "severity": 3,
+                "startEnd": 1,
+                "errorCode": "E405",
+                "errorType": "Lost cloud connection",
+                "timestamp": "2026-08-19 08:06:22",
+                "errorGroup": "",
+                "description": "",
+            },
+        ],
+    }
+    coordinator.ingest_post("PP-001", payload_with_errors)
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.planetpod_pp_001_last_error")
+    assert state.state == (
+        "[warning] E402 (Reboot): Had a reboot, reason: 05; [ ] E405 (Lost cloud connection)"
+    )
 
 
 async def test_always_present_command_fields_default_false(hass: HomeAssistant):

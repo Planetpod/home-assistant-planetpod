@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Callable
 
 from homeassistant.components.sensor import (
@@ -27,6 +28,85 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import ATTR_ATTRIBUTION, DOMAIN, MANUFACTURER
 from .coordinator import PlanetpodDataUpdateCoordinator
 from .coordinator_local import PlanetpodLocalCoordinator
+
+
+_ERROR_TIMESTAMP_FORMATS = (
+    "%Y-%m-%d %H:%M:%S",       # real firmware format, e.g. "2026-08-19 08:06:27"
+    "%Y-%m-%dT%H:%M:%S.%fZ",   # ISO, in case a future firmware version sends this
+    "%Y-%m-%dT%H:%M:%SZ",
+)
+
+
+def _parse_error_timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    for fmt in _ERROR_TIMESTAMP_FORMATS:
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _sort_errors_newest_first(logs: list[dict]) -> list[dict]:
+    """Sort error log entries by timestamp, newest first.
+
+    Firmware's getErrors() (ErrorLogger.cpp) returns a
+    std::unordered_map<std::string, ErrorLog> -- C++ gives NO ordering
+    guarantee for unordered_map iteration, so the JSON array's order is
+    effectively arbitrary (hash-bucket order), not chronological or
+    insertion order -- confirmed with a real payload where an older E405
+    entry was last and a newer E402 was first. Entries with an unparsable
+    timestamp sort last rather than raising.
+    """
+    return sorted(
+        logs,
+        key=lambda entry: _parse_error_timestamp(entry.get("timestamp")) or datetime.min,
+        reverse=True,
+    )
+
+
+def _format_error_entry(entry: dict) -> str:
+    """Format one error log entry as "[group] code (type): description".
+
+    Firmware's ErrorInfoList isn't consistent -- most entries have a real
+    human-readable `description`, but some (e.g. E405/lost cloud connection)
+    ship with an empty one, carrying their only human text in `errorType`
+    instead, and `errorGroup` is often empty too. `[group]` is always shown
+    (as "[ ]" when empty) so every entry's shape stays visually consistent;
+    code/type/description are each included only when firmware populated
+    them.
+    """
+    group = entry.get("errorGroup") or ""
+    code = entry.get("errorCode") or ""
+    error_type = entry.get("errorType") or ""
+    description = entry.get("description") or ""
+
+    text = f"[{group or ' '}]"
+    if code and error_type:
+        text += f" {code} ({error_type})"
+    else:
+        label = code or error_type
+        if label:
+            text += f" {label}"
+    if description:
+        text += f": {description}"
+    return text
+
+
+def _format_last_error(pod: dict) -> str:
+    """Format every error in the latest POST, newest first.
+
+    One POST can legitimately carry more than one error at a time (e.g. a
+    just-resolved reboot notice alongside a currently-active connectivity
+    error) -- show all of them rather than collapsing to a single "most
+    important" one.
+    """
+    logs = pod.get("error_logs")
+    if not logs:
+        return "None"
+    formatted = [f for entry in _sort_errors_newest_first(logs) if (f := _format_error_entry(entry))]
+    return "; ".join(formatted) if formatted else "None"
 
 AnyPlanetpodCoordinator = PlanetpodDataUpdateCoordinator | PlanetpodLocalCoordinator
 
@@ -220,16 +300,14 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
         attr_fn=lambda pod: {"raw_payload": pod.get("raw_post", {}).get("payload")},
     ),
     # Local-mode only: surfaces the SCU/BMS errorLogs field from the raw
-    # POST, which the cloud REST API never exposes. The state itself is the
-    # most recent error's description (or "None") so it's visible on the
-    # device page directly, with the full list as an attribute.
+    # POST, which the cloud REST API never exposes. The state itself lists
+    # every error in the latest POST, newest first (see _format_last_error),
+    # with the full raw list as an attribute.
     PlanetpodSensorEntityDescription(
         key="last_error",
         name="Last Error",
         entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda pod: (
-            pod["error_logs"][-1]["description"] if pod.get("error_logs") else "None"
-        ),
+        value_fn=_format_last_error,
         attr_fn=lambda pod: {"error_logs": pod.get("error_logs", [])},
     ),
 )
