@@ -46,6 +46,17 @@ DEFAULT_SPEED_SETPOINT_DURATION_MIN = 30
 MIN_SPEED_SETPOINT_DURATION_MIN = 1
 MAX_SPEED_SETPOINT_DURATION_MIN = 720
 
+# Persisted so an active Speed Setpoint command survives a coordinator
+# reload (HA restart, integration reinstall/update) instead of silently
+# reverting to idle with time still remaining.
+CONF_SPEED_SETPOINT_EXPIRES_AT = "speed_setpoint_expires_at"
+CONF_SENT_SPEED_SETPOINT_KW = "sent_speed_setpoint_kw"
+
+# Persisted so a one-shot command (Reboot/Calibration/...) queued via a
+# button press isn't silently dropped if a reload happens before the pod's
+# next GET picks it up.
+CONF_PENDING_COMMANDS = "pending_commands"
+
 ONLINE_TIMEOUT_SECONDS = 60
 
 QUERY_PARAM_SERIAL = "serial"

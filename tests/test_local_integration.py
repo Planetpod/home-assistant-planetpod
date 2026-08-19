@@ -363,6 +363,54 @@ async def test_speed_setpoint_duration_changes_expiry_window(hass: HomeAssistant
     assert coordinator.effective_speed_setpoint_kw == 0.0
 
 
+async def test_active_speed_setpoint_survives_reload(hass: HomeAssistant):
+    """An active Speed Setpoint command must survive a coordinator reload
+    (HA restart, integration update/reinstall) with its remaining time
+    intact -- not silently revert to idle just because a fresh coordinator
+    instance was created.
+    """
+    entry = await _setup_local_entry(hass, options={"mode": "speed"})
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    coordinator.set_speed_setpoint_duration(240)
+    coordinator.set_speed_setpoint(2.0)
+    assert coordinator.effective_speed_setpoint_kw == 2.0
+
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    reloaded_coordinator = hass.data[DOMAIN][entry.entry_id]
+    assert reloaded_coordinator is not coordinator
+    assert reloaded_coordinator.speed_setpoint_active is True
+    assert reloaded_coordinator.effective_speed_setpoint_kw == 2.0
+
+
+async def test_pending_command_survives_reload_before_next_get(hass: HomeAssistant):
+    """A one-shot command (Reboot/Calibration/...) queued via a button press
+    must not be silently dropped if a reload happens before the pod's next
+    GET consumes it.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    coordinator.trigger_command("PP-001", "reboot")
+
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    reloaded_coordinator = hass.data[DOMAIN][entry.entry_id]
+    assert reloaded_coordinator is not coordinator
+    reloaded_coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    response = reloaded_coordinator.get_response_for("PP-001")
+    assert response["Reboot"] is True
+
+
 async def test_balance_source_sensor_shows_no_p1_error(hass: HomeAssistant):
     """With Balance mode selected and no usable G1 reading (HA sensor
     unavailable, no pod-reported G1 in the payload either), the P1 Balance
