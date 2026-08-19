@@ -7,6 +7,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 
 from .api_local import ensure_local_view_registered
 from .const import CONF_CONNECTION_TYPE, CONNECTION_TYPE_LOCAL, DOMAIN, PENDING_PODS_KEY
@@ -16,6 +17,26 @@ from .coordinator_local import PlanetpodLocalCoordinator
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.NUMBER, Platform.SELECT, Platform.BUTTON]
+
+# Buttons removed from button.py's BUTTON_DESCRIPTIONS -- HA does not delete
+# an entity from the registry just because the integration stops creating
+# it (it's left behind, usually shown as unavailable), so this must be done
+# explicitly on every setup or the removed buttons keep reappearing.
+_REMOVED_BUTTON_KEYS = ("unlock_scu", "bms_update", "debug_on")
+
+
+def _remove_stale_button_entities(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    registry = er.async_get(hass)
+    for entity_entry in er.async_entries_for_config_entry(registry, entry.entry_id):
+        if entity_entry.domain != "button":
+            continue
+        if entity_entry.unique_id.endswith(tuple(f"_{key}" for key in _REMOVED_BUTTON_KEYS)):
+            _LOGGER.warning(
+                "PLANETPOD: removing stale button entity %s (unique_id=%s)",
+                entity_entry.entity_id,
+                entity_entry.unique_id,
+            )
+            registry.async_remove(entity_entry.entity_id)
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -41,6 +62,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data.setdefault(DOMAIN, {})
 
     if entry.data.get(CONF_CONNECTION_TYPE) == CONNECTION_TYPE_LOCAL:
+        _remove_stale_button_entities(hass, entry)
+
         coordinator: Any = PlanetpodLocalCoordinator(hass, entry)
 
         pending: dict[str, Any] = hass.data[DOMAIN].get(PENDING_PODS_KEY, {})

@@ -255,6 +255,40 @@ async def test_command_buttons_are_config_category(hass: HomeAssistant):
         assert entry_reg.entity_category is None
 
 
+async def test_stale_removed_buttons_are_deleted_from_registry_not_just_unavailable(
+    hass: HomeAssistant,
+):
+    """HA does not delete an entity from the registry just because the
+    integration stops creating it -- it's left behind (usually shown as
+    unavailable/disabled, not gone). Simulate a leftover Unlock SCU button
+    from before it was removed from BUTTON_DESCRIPTIONS, and confirm
+    async_setup_entry actually removes it from the registry, not just lets
+    it sit there disabled.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Planetpod",
+        data={CONF_CONNECTION_TYPE: CONNECTION_TYPE_LOCAL},
+        options={},
+        unique_id="planetpod_local",
+    )
+    entry.add_to_hass(hass)
+
+    registry = er.async_get(hass)
+    stale = registry.async_get_or_create(
+        "button",
+        DOMAIN,
+        f"{entry.entry_id}_PP-001_unlock_scu",
+        config_entry=entry,
+    )
+    assert registry.async_get(stale.entity_id) is not None
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert registry.async_get(stale.entity_id) is None
+
+
 async def _setup_local_entry(hass: HomeAssistant, options: dict | None = None) -> MockConfigEntry:
     entry = MockConfigEntry(
         domain=DOMAIN,
