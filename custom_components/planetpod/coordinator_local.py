@@ -18,10 +18,13 @@ from .const import (
     CONF_G1_HA_ENTITY_ID,
     CONF_G1_SOURCE,
     CONF_MODE,
+    CONF_PENDING_COMMANDS,
+    CONF_SENT_SPEED_SETPOINT_KW,
     CONF_SOC_LOWER_LIMIT,
     CONF_SOC_UPPER_LIMIT,
     CONF_SOUND_MODE,
     CONF_SPEED_SETPOINT_DURATION_MIN,
+    CONF_SPEED_SETPOINT_EXPIRES_AT,
     CONF_SPEED_SETPOINT_KW,
     DEFAULT_MODE,
     DEFAULT_SOC_LOWER_LIMIT,
@@ -92,24 +95,53 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
         self._last_known_bms_fields: dict[str, dict[str, Any]] = {}
         self._last_message_at: dict[str, datetime] = {}
         self._last_requested_power_kw: dict[str, float] = {}
-        self._pending_commands: dict[str, set[str]] = {}
-        self._speed_setpoint_expires_at: datetime | None = None
+
+        # Restored from entry.options (see _persist_pending_commands) so a
+        # button press queued right before a reload -- HA restart,
+        # integration update/reinstall -- isn't silently dropped before the
+        # pod's next GET picks it up.
+        self._pending_commands: dict[str, set[str]] = {
+            serial: set(commands)
+            for serial, commands in entry.options.get(CONF_PENDING_COMMANDS, {}).items()
+        }
+
+        # Restored from entry.options (see send_speed_command) so an active
+        # Speed Setpoint command survives a reload instead of silently
+        # reverting to idle with time still remaining.
+        raw_expires_at = entry.options.get(CONF_SPEED_SETPOINT_EXPIRES_AT)
+        self._speed_setpoint_expires_at: datetime | None = (
+            datetime.fromisoformat(raw_expires_at) if raw_expires_at else None
+        )
         # Snapshot of CONF_SPEED_SETPOINT_KW taken at the moment
         # send_speed_command() last ran -- effective_speed_setpoint_kw must
         # read this, NOT the live option, otherwise staging a new value
         # while a previous command is still active leaks through immediately
-        # without send_speed_command() ever being called again.
-        self._sent_speed_setpoint_kw: float = DEFAULT_SPEED_SETPOINT_KW
+        # without send_speed_command() ever being called again. Also
+        # restored from entry.options for the same reload-survival reason.
+        self._sent_speed_setpoint_kw: float = entry.options.get(
+            CONF_SENT_SPEED_SETPOINT_KW, DEFAULT_SPEED_SETPOINT_KW
+        )
         self.async_set_updated_data({"pods": []})
+
+    def _persist_pending_commands(self) -> None:
+        new_options = {
+            **self.entry.options,
+            CONF_PENDING_COMMANDS: {
+                serial: sorted(commands) for serial, commands in self._pending_commands.items()
+            },
+        }
+        self.hass.config_entries.async_update_entry(self.entry, options=new_options)
 
     def trigger_command(self, serial: str, command: str) -> None:
         """Queue a one-shot command (reboot, calibration, ...) for a pod.
 
-        Sent on the pod's next GET, then cleared -- not a persistent state.
+        Sent on the pod's next GET, then cleared -- persisted in the
+        meantime so a reload before that GET doesn't drop it.
         """
         if command not in ONE_SHOT_COMMANDS:
             raise ValueError(f"Unknown command: {command}")
         self._pending_commands.setdefault(serial, set()).add(command)
+        self._persist_pending_commands()
 
     @property
     def mode(self) -> str:
@@ -166,13 +198,22 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
         Snapshots the staged value into _sent_speed_setpoint_kw so a later
         stage_speed_setpoint() call (without a matching send) can never
         change what's actually being applied -- and fully overwrites any
-        still-active previous command, no queueing."""
+        still-active previous command, no queueing. Both the snapshot and
+        the expiry are persisted into entry.options so an active command
+        survives a coordinator reload (HA restart, integration
+        update/reinstall) instead of silently reverting to idle."""
         self._sent_speed_setpoint_kw = self.entry.options.get(
             CONF_SPEED_SETPOINT_KW, DEFAULT_SPEED_SETPOINT_KW
         )
         self._speed_setpoint_expires_at = datetime.now(timezone.utc) + timedelta(
             minutes=self.speed_setpoint_duration_min
         )
+        new_options = {
+            **self.entry.options,
+            CONF_SENT_SPEED_SETPOINT_KW: self._sent_speed_setpoint_kw,
+            CONF_SPEED_SETPOINT_EXPIRES_AT: self._speed_setpoint_expires_at.isoformat(),
+        }
+        self.hass.config_entries.async_update_entry(self.entry, options=new_options)
         self._rebuild()
 
     @property
@@ -274,7 +315,10 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
         if serial not in self._raw_payloads:
             return None
 
-        pending = self._pending_commands.pop(serial, None) or set()
+        popped = self._pending_commands.pop(serial, None)
+        pending = popped or set()
+        if popped:
+            self._persist_pending_commands()
 
         g1_delivered, g1_returned = self._resolve_g1(serial)
 
