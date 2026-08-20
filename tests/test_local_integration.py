@@ -10,9 +10,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
@@ -837,3 +839,73 @@ async def test_standby_mode_forces_zero_setpoint(hass: HomeAssistant):
     response = coordinator.get_response_for("PP-001")
     assert response["Modus"] == "solarSmart"
     assert response["solarSmart"] == {"subMode": "speed", "setpoint_kW": 0.0}
+
+
+async def test_soc_lower_limit_cannot_exceed_upper_limit(hass: HomeAssistant):
+    """Setting SoC Lower Limit above the current SoC Upper Limit must be
+    rejected -- a lower limit higher than the upper limit is nonsensical.
+    """
+    entry = await _setup_local_entry(
+        hass, options={"soc_upper_limit_pct": 85, "soc_lower_limit_pct": 20}
+    )
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call(
+            "number",
+            "set_value",
+            {"entity_id": "number.planetpod_pp_001_soc_lower_limit", "value": 90},
+            blocking=True,
+        )
+    await hass.async_block_till_done()
+
+    # Rejected -- the stored value must be unchanged.
+    assert coordinator.soc_lower_limit_pct == 20
+
+
+async def test_soc_upper_limit_cannot_go_below_lower_limit(hass: HomeAssistant):
+    """Setting SoC Upper Limit below the current SoC Lower Limit must be
+    rejected -- an upper limit lower than the lower limit is nonsensical.
+    """
+    entry = await _setup_local_entry(
+        hass, options={"soc_upper_limit_pct": 85, "soc_lower_limit_pct": 20}
+    )
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call(
+            "number",
+            "set_value",
+            {"entity_id": "number.planetpod_pp_001_soc_upper_limit", "value": 10},
+            blocking=True,
+        )
+    await hass.async_block_till_done()
+
+    assert coordinator.soc_upper_limit_pct == 85
+
+
+async def test_soc_limits_can_be_set_equal(hass: HomeAssistant):
+    """Lower limit == upper limit is a degenerate but valid configuration
+    (locks the battery at a fixed SoC) -- must not be rejected.
+    """
+    entry = await _setup_local_entry(
+        hass, options={"soc_upper_limit_pct": 85, "soc_lower_limit_pct": 20}
+    )
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    await hass.services.async_call(
+        "number",
+        "set_value",
+        {"entity_id": "number.planetpod_pp_001_soc_lower_limit", "value": 85},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    assert coordinator.soc_lower_limit_pct == 85
+    assert coordinator.soc_upper_limit_pct == 85
