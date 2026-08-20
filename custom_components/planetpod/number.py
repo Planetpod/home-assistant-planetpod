@@ -20,6 +20,7 @@ from homeassistant.components.number import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, UnitOfPower
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -185,6 +186,18 @@ class PlanetpodSocLimitNumber(CoordinatorEntity[PlanetpodLocalCoordinator], Numb
         if self.entity_description.option_key == CONF_SPEED_SETPOINT_DURATION_MIN:
             self.coordinator.set_speed_setpoint_duration(value)
             return
+        if self.entity_description.option_key == CONF_SOC_LOWER_LIMIT:
+            if value > self.coordinator.soc_upper_limit_pct:
+                raise HomeAssistantError(
+                    f"SoC Lower Limit ({value}%) cannot be higher than "
+                    f"SoC Upper Limit ({self.coordinator.soc_upper_limit_pct}%)"
+                )
+        elif self.entity_description.option_key == CONF_SOC_UPPER_LIMIT:
+            if value < self.coordinator.soc_lower_limit_pct:
+                raise HomeAssistantError(
+                    f"SoC Upper Limit ({value}%) cannot be lower than "
+                    f"SoC Lower Limit ({self.coordinator.soc_lower_limit_pct}%)"
+                )
         new_options = {**self._entry.options, self.entity_description.option_key: value}
         self.hass.config_entries.async_update_entry(self._entry, options=new_options)
         self.coordinator.async_options_updated()
