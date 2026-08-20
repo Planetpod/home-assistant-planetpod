@@ -76,6 +76,11 @@ class PlanetpodLocalView(HomeAssistantView):
             _LOGGER.warning("PLANETPOD: POST /planetpod missing systemInfo.podSerialNumber")
             return web.Response(status=400, text="Missing systemInfo.podSerialNumber")
 
+        # Mirrors the GET handler logging its full response below -- the
+        # actual payload content, not just serial/source, so it's visible
+        # directly in HA's logs without digging through entity attributes.
+        _LOGGER.warning("PLANETPOD: POST /planetpod payload for serial=%s: %s", serial, payload)
+
         coordinator = _get_any_coordinator(hass)
         if coordinator is not None:
             _LOGGER.warning("PLANETPOD: POST /planetpod ingested by coordinator, serial=%s", serial)
