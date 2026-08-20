@@ -95,6 +95,7 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
         self._last_known_bms_fields: dict[str, dict[str, Any]] = {}
         self._last_message_at: dict[str, datetime] = {}
         self._last_requested_power_kw: dict[str, float] = {}
+        self._last_get_response: dict[str, dict[str, Any]] = {}
 
         # Restored from entry.options (see _persist_pending_commands) so a
         # button press queued right before a reload -- HA restart,
@@ -283,6 +284,7 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
                 "payload": payload,
                 "received_at": self._last_message_at.get(serial),
             }
+            status["raw_get"] = self._last_get_response.get(serial, {})
             g1_delivered, g1_returned = self._resolve_g1(serial)
             no_p1 = g1_delivered is None and g1_returned is None
             status["balance"] = {
@@ -347,6 +349,12 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
         response["sameGroup"] = True
 
         response.update(_build_command_flags(pending))
+
+        self._last_get_response[serial] = {
+            "response": response,
+            "sent_at": datetime.now(timezone.utc),
+        }
+        self._rebuild()
 
         return response
 
