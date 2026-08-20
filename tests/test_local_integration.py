@@ -8,6 +8,7 @@ coordinator's data dict alone.
 """
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -589,6 +590,10 @@ async def test_last_post_received_sensor_exposes_raw_payload(hass: HomeAssistant
     """The Last POST Received sensor must expose a real timestamp state plus
     the raw POST payload as an attribute, so the last message from a pod is
     inspectable from Developer Tools > States without digging through logs.
+
+    The attribute is pretty-printed JSON (not a raw dict) so it's actually
+    readable in the more-info dialog/Developer Tools, not one long repr()
+    line -- assert on the parsed content, not string equality.
     """
     entry = await _setup_local_entry(hass)
     coordinator = hass.data[DOMAIN][entry.entry_id]
@@ -598,7 +603,7 @@ async def test_last_post_received_sensor_exposes_raw_payload(hass: HomeAssistant
     state = hass.states.get("sensor.planetpod_pp_001_last_post_received")
     assert state is not None
     assert state.state != "unknown"
-    assert state.attributes["raw_payload"] == MOCK_LOCAL_PAYLOAD
+    assert json.loads(state.attributes["raw_payload"]) == MOCK_LOCAL_PAYLOAD
 
     registry = er.async_get(hass)
     entry_reg = registry.async_get("sensor.planetpod_pp_001_last_post_received")
@@ -812,7 +817,8 @@ async def test_soh_and_cycle_count_survive_posts_that_omit_them(hass: HomeAssist
 
     # The raw diagnostic sensor must stay genuinely raw (no backfilled values).
     last_post_state = hass.states.get("sensor.planetpod_pp_001_last_post_received")
-    assert "soh" not in last_post_state.attributes["raw_payload"]["bmsData"]
+    raw_payload = json.loads(last_post_state.attributes["raw_payload"])
+    assert "soh" not in raw_payload["bmsData"]
 
 
 async def test_standby_mode_forces_zero_setpoint(hass: HomeAssistant):
@@ -909,3 +915,31 @@ async def test_soc_limits_can_be_set_equal(hass: HomeAssistant):
 
     assert coordinator.soc_lower_limit_pct == 85
     assert coordinator.soc_upper_limit_pct == 85
+
+
+async def test_last_get_sent_sensor_exposes_raw_response(hass: HomeAssistant):
+    """Mirrors "Last POST Received" for the other direction -- the Last GET
+    Sent sensor must expose a real timestamp state plus the actual GET
+    response HA sent back to the pod, as pretty-printed JSON, so the wire
+    contract is inspectable without digging through logs.
+    """
+    entry = await _setup_local_entry(
+        hass, options={"soc_upper_limit_pct": 85, "soc_lower_limit_pct": 20}
+    )
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.planetpod_pp_001_last_get_sent")
+    assert state is not None
+    assert state.state == "unknown"  # no GET served yet
+
+    response = coordinator.get_response_for("PP-001")
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.planetpod_pp_001_last_get_sent")
+    assert state.state != "unknown"
+    raw_response = json.loads(state.attributes["raw_response"])
+    assert raw_response == response
+    assert raw_response["Min_SOC"] == 20
+    assert raw_response["Max_SOC"] == 85

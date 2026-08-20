@@ -1,6 +1,7 @@
 """Sensor platform for Planetpod integration."""
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime
@@ -92,6 +93,19 @@ def _format_error_entry(entry: dict) -> str:
     if description:
         text += f": {description}"
     return text
+
+
+def _pretty_json(value: Any) -> str | None:
+    """Render a payload as indented JSON so it's actually readable as an
+    entity attribute -- HA's Developer Tools/more-info dialog show a raw
+    dict's repr() as one hard-to-read line, especially once it's nested a
+    few levels deep (systemInfo/bmsData/etc.). default=str covers datetime
+    objects (e.g. received_at/sent_at), which json.dumps can't serialize
+    directly.
+    """
+    if not value:
+        return None
+    return json.dumps(value, indent=2, default=str)
 
 
 def _format_last_error(pod: dict) -> str:
@@ -291,13 +305,26 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
     ),
     # Diagnostic aid: lets you confirm what the pod is actually sending and
     # when, from Developer Tools > States, without digging through HA logs.
+    # raw_payload is pretty-printed JSON (not the raw dict) so it's actually
+    # readable in the more-info dialog/Developer Tools attribute view rather
+    # than a single hard-to-read repr() line.
     PlanetpodSensorEntityDescription(
         key="last_post_received",
         name="Last POST Received",
         device_class=SensorDeviceClass.TIMESTAMP,
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=lambda pod: pod.get("raw_post", {}).get("received_at"),
-        attr_fn=lambda pod: {"raw_payload": pod.get("raw_post", {}).get("payload")},
+        attr_fn=lambda pod: {"raw_payload": _pretty_json(pod.get("raw_post", {}).get("payload"))},
+    ),
+    # Mirrors "Last POST Received" for the other direction -- what HA most
+    # recently sent back to the pod in a GET response, and when.
+    PlanetpodSensorEntityDescription(
+        key="last_get_sent",
+        name="Last GET Sent",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda pod: pod.get("raw_get", {}).get("sent_at"),
+        attr_fn=lambda pod: {"raw_response": _pretty_json(pod.get("raw_get", {}).get("response"))},
     ),
     # Local-mode only: surfaces the SCU/BMS errorLogs field from the raw
     # POST, which the cloud REST API never exposes. The state itself lists
