@@ -8,6 +8,6 @@
   "requirements": [],
   "homeassistant": "2024.4.0",
   "iot_class": "local_push",
-  "version": "1.1.0-beta.25",
+  "version": "1.1.0-beta.26",
   "issue_tracker": "https://github.com/Planetpod/home-assistant-planetpod/issues"
 }

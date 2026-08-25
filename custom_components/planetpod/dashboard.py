@@ -64,22 +64,55 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
     if not all(planning_entities):
         return None
 
+    charge_status = _eid(registry, entry_id, serial, "sensor", "charge_status")
+    deployed_power = _eid(registry, entry_id, serial, "sensor", "deployed_power_kw")
+    requested_power = _eid(registry, entry_id, serial, "sensor", "requested_power_kw")
+    battery_temp = _eid(registry, entry_id, serial, "sensor", "avg_battery_temp_c")
+    p1_delivered = _eid(registry, entry_id, serial, "sensor", "balance_g1_power_delivered_kw")
+    p1_returned = _eid(registry, entry_id, serial, "sensor", "balance_g1_power_returned_kw")
+    if not all(
+        (charge_status, deployed_power, requested_power, battery_temp, p1_delivered, p1_returned)
+    ):
+        return None
+
+    kpi_tiles = [
+        {
+            "kind": "value_subtitle",
+            "label": "State of Charge",
+            "entity": soc,
+            "unit": "%",
+            "subtitle_entity": charge_status,
+        },
+        {
+            "kind": "dual_signed",
+            "label": "Deployed Power",
+            "primary_entity": deployed_power,
+            "secondary_entity": requested_power,
+            "secondary_label": "Requested",
+            "unit": "kW",
+        },
+        {
+            "kind": "value",
+            "label": "Temperature",
+            "entity": battery_temp,
+            "unit": "°C",
+        },
+        {
+            "kind": "net_signed",
+            "label": "P1 Meter",
+            "positive_entity": p1_delivered,
+            "negative_entity": p1_returned,
+            "unit": "kW",
+        },
+    ]
+
     status_entities = [
         e
         for key, domain in (
             ("mode", "select"),
             ("online", "sensor"),
-            ("charge_status", "sensor"),
-            ("soc_pct", "sensor"),
-            ("deployed_power_kw", "sensor"),
-            ("requested_power_kw", "sensor"),
-            ("received_by_pod_power_kw", "sensor"),
             ("max_charge_power_kw", "sensor"),
             ("max_discharge_power_kw", "sensor"),
-            ("avg_battery_temp_c", "sensor"),
-            ("avg_ac_voltage_v", "sensor"),
-            ("balance_g1_power_delivered_kw", "sensor"),
-            ("balance_g1_power_returned_kw", "sensor"),
             ("relay_status", "sensor"),
             ("soc_upper_limit_pct", "number"),
             ("soc_lower_limit_pct", "number"),
@@ -102,6 +135,11 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
                 "type": "grid",
                 "cards": [
                     {"type": "heading", "heading": "Status", "icon": "mdi:battery-charging-high"},
+                    {
+                        "type": "custom:planetpod-kpi-card",
+                        "tiles": kpi_tiles,
+                        "grid_options": {"columns": "full", "rows": 4},
+                    },
                     {"type": "entities", "entities": status_entities},
                     {
                         "type": "grid",
