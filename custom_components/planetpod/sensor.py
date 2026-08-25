@@ -29,6 +29,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import ATTR_ATTRIBUTION, DOMAIN, MANUFACTURER
 from .coordinator import PlanetpodDataUpdateCoordinator
 from .coordinator_local import PlanetpodLocalCoordinator
+from .energy import async_setup_energy_entities
 
 
 _ERROR_TIMESTAMP_FORMATS = (
@@ -349,6 +350,7 @@ async def async_setup_entry(
     coordinator: AnyPlanetpodCoordinator = hass.data[DOMAIN][entry.entry_id]
 
     known_serials: set[str] = set()
+    known_energy_ids: set[str] = set()
 
     def _add_new_pods() -> None:
         """Add sensors for any pods not yet registered."""
@@ -363,6 +365,15 @@ async def async_setup_entry(
                 new_entities.append(PlanetpodSensor(coordinator, entry, description, serial))
         if new_entities:
             async_add_entities(new_entities, False)
+
+        # Backs the Energy dashboard card -- integrates P1/deployed power
+        # into kWh. Registered after the pod's power sensors above so their
+        # unique_ids already exist in the entity registry for lookup.
+        hass.async_create_task(
+            async_setup_energy_entities(
+                hass, entry, lambda ents: async_add_entities(ents, False), known_energy_ids, pods
+            )
+        )
 
     # Register initial pods
     _add_new_pods()

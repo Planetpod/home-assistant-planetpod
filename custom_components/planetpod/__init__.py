@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
+from homeassistant.components.frontend import add_extra_js_url
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.helpers import entity_registry as er
 
 from .api_local import ensure_local_view_registered
@@ -17,6 +20,31 @@ from .coordinator_local import PlanetpodLocalCoordinator
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.NUMBER, Platform.SELECT, Platform.BUTTON]
+
+# Bundled Lovelace cards (SoC / Energy / Planning), served straight from the
+# integration's www/ folder and self-registered as a frontend resource on
+# every boot -- avoids asking the user to add a dashboard resource by hand,
+# the way most HACS cards require.
+_CARD_URL = f"/{DOMAIN}_static/planetpod-cards.js"
+
+
+async def _async_register_frontend_resources(hass: HomeAssistant) -> None:
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    if domain_data.get("_static_registered"):
+        return
+    domain_data["_static_registered"] = True
+
+    www_path = Path(__file__).parent / "www"
+    await hass.http.async_register_static_paths(
+        [StaticPathConfig(f"/{DOMAIN}_static", str(www_path), cache_headers=False)]
+    )
+    # frontend is a core component always loaded before custom integrations
+    # in a real HA install, but isn't guaranteed present in a minimal test
+    # environment -- skip registering the resource rather than failing setup.
+    try:
+        add_extra_js_url(hass, _CARD_URL)
+    except KeyError:
+        _LOGGER.debug("PLANETPOD: frontend component not loaded, skipping dashboard resource registration")
 
 # Buttons removed from button.py's BUTTON_DESCRIPTIONS -- HA does not delete
 # an entity from the registry just because the integration stops creating
@@ -60,6 +88,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry.data.get(CONF_CONNECTION_TYPE),
     )
     hass.data.setdefault(DOMAIN, {})
+    await _async_register_frontend_resources(hass)
 
     if entry.data.get(CONF_CONNECTION_TYPE) == CONNECTION_TYPE_LOCAL:
         _remove_stale_button_entities(hass, entry)

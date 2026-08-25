@@ -9,6 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from custom_components.planetpod.const import DEFAULT_API_URL, DOMAIN, MANUFACTURER
+from custom_components.planetpod.energy import ENERGY_DESCRIPTIONS
 from custom_components.planetpod.sensor import SENSOR_DESCRIPTIONS
 from tests.conftest import MOCK_API_URL, MOCK_SERIAL
 
@@ -20,9 +21,11 @@ def _entity_id(sensor_key: str) -> str:
 
 
 async def test_sensor_count(hass: HomeAssistant, loaded_config_entry):
-    """One sensor entity per SENSOR_DESCRIPTIONS entry per pod."""
+    """One sensor entity per SENSOR_DESCRIPTIONS entry per pod, plus the
+    energy-integration sensors (grid delivered/returned, battery net) added
+    for the Energy dashboard card."""
     states = hass.states.async_all("sensor")
-    assert len(states) == len(SENSOR_DESCRIPTIONS)
+    assert len(states) == len(SENSOR_DESCRIPTIONS) + len(ENERGY_DESCRIPTIONS)
 
 
 async def test_soc_value(hass: HomeAssistant, loaded_config_entry):

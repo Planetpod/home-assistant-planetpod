@@ -34,6 +34,7 @@ from .const import (
     CONF_SPEED_SETPOINT_DURATION_MIN,
     CONF_SPEED_SETPOINT_KW,
     CONNECTION_TYPE_LOCAL,
+    DEFAULT_PLANNING_POWER_KW,
     DEFAULT_SPEED_SETPOINT_DURATION_MIN,
     DEFAULT_SPEED_SETPOINT_KW,
     DOMAIN,
@@ -44,6 +45,7 @@ from .const import (
     MIN_SOC_LOWER_LIMIT_PCT,
     MIN_SPEED_SETPOINT_DURATION_MIN,
     MODE_SPEED,
+    PLANNING_HOURS,
 )
 from .coordinator_local import PlanetpodLocalCoordinator
 
@@ -102,6 +104,26 @@ NUMBER_DESCRIPTIONS: tuple[PlanetpodNumberEntityDescription, ...] = (
         native_step=1,
         mode=NumberMode.BOX,
         value_fn=lambda coordinator: coordinator.speed_setpoint_duration_min,
+    ),
+    # 24 hourly planning setpoints, driven by the Planning dashboard card
+    # (drag a point -> writes this hour's entity). Plain options-backed
+    # numbers, same as the SoC limits above -- no staging, each write takes
+    # effect immediately.
+    *(
+        PlanetpodNumberEntityDescription(
+            key=f"planning_hour_{hour:02d}",
+            name=f"Planning {hour:02d}:00",
+            option_key=f"planning_hour_{hour:02d}",
+            native_unit_of_measurement=UnitOfPower.KILO_WATT,
+            native_min_value=-MAX_CHARGE_POWER_KW,
+            native_max_value=MAX_CHARGE_POWER_KW,
+            native_step=0.1,
+            mode=NumberMode.BOX,
+            value_fn=lambda coordinator, hour=hour: coordinator.entry.options.get(
+                f"planning_hour_{hour:02d}", DEFAULT_PLANNING_POWER_KW
+            ),
+        )
+        for hour in PLANNING_HOURS
     ),
 )
 
