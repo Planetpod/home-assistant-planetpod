@@ -38,7 +38,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-Mode = Literal["balance", "speed", "standby"]
+Mode = Literal["balance", "speed", "standby", "planning"]
 
 
 def compute_get_response(
@@ -47,6 +47,7 @@ def compute_get_response(
     g1_power_delivered_kw: float | None,
     g1_power_returned_kw: float | None,
     speed_setpoint_kw: float | None = None,
+    planning_power_kw: float | None = None,
 ) -> dict[str, Any]:
     """Compute the GET /planetpod response body for one pod.
 
@@ -65,6 +66,12 @@ def compute_get_response(
         wire_sub_mode = "balance"
     elif mode == "standby":
         setpoint_kw = 0.0
+        wire_sub_mode = "speed"
+    elif mode == "planning":
+        # Same wire shape as speed -- a held kW setpoint -- just sourced from
+        # the current hour's entry in the 24-hour schedule instead of one
+        # manually staged value.
+        setpoint_kw = planning_power_kw or 0.0
         wire_sub_mode = "speed"
     else:  # speed
         setpoint_kw = speed_setpoint_kw or 0.0
