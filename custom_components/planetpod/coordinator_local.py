@@ -13,6 +13,7 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.util import dt as dt_util
 
 from .const import (
     CONF_G1_HA_ENTITY_ID,
@@ -27,6 +28,7 @@ from .const import (
     CONF_SPEED_SETPOINT_EXPIRES_AT,
     CONF_SPEED_SETPOINT_KW,
     DEFAULT_MODE,
+    DEFAULT_PLANNING_POWER_KW,
     DEFAULT_SOC_LOWER_LIMIT,
     DEFAULT_SOC_UPPER_LIMIT,
     DEFAULT_SOUND_MODE,
@@ -159,6 +161,17 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
     @property
     def sound_mode(self) -> bool:
         return self.entry.options.get(CONF_SOUND_MODE, DEFAULT_SOUND_MODE)
+
+    @property
+    def effective_planning_power_kw(self) -> float:
+        """The Planning schedule's setpoint for the current wall-clock hour.
+
+        Uses HA's configured local timezone, not UTC -- the Planning
+        dashboard card labels hours (00:00..23:00) as local wall-clock time,
+        so the schedule must be read back against the same clock.
+        """
+        hour = dt_util.now().hour
+        return self.entry.options.get(f"planning_hour_{hour:02d}", DEFAULT_PLANNING_POWER_KW)
 
     def async_options_updated(self) -> None:
         """Recompute pod status after an option (SoC limits, sound mode, ...) changes."""
@@ -329,6 +342,7 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
             g1_power_delivered_kw=g1_delivered,
             g1_power_returned_kw=g1_returned,
             speed_setpoint_kw=self.effective_speed_setpoint_kw,
+            planning_power_kw=self.effective_planning_power_kw,
         )
 
         set_point = response["solarSmart"]["setpoint_kW"]

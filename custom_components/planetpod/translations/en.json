@@ -82,7 +82,8 @@
         "state": {
           "balance": "Balance",
           "speed": "Speed",
-          "standby": "Standby"
+          "standby": "Standby",
+          "planning": "Planning"
         }
       }
     },

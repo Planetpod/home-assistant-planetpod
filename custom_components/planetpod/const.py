@@ -39,6 +39,7 @@ CONF_MODE = "mode"
 MODE_BALANCE = "balance"
 MODE_SPEED = "speed"
 MODE_STANDBY = "standby"
+MODE_PLANNING = "planning"
 DEFAULT_MODE = MODE_BALANCE
 
 CONF_SPEED_SETPOINT_KW = "speed_setpoint_kw"

@@ -1,9 +1,9 @@
 """Select platform for Planetpod integration (local mode only).
 
-Lets an installer switch a local-mode install between Balance, Speed, and
-Standby mode from the HA UI, instead of it being fixed at whatever was set
-up initially. Mode is shared across the install but shown on each pod's own
-device, same reasoning as number.py's SoC limits.
+Lets an installer switch a local-mode install between Balance, Speed,
+Standby, and Planning mode from the HA UI, instead of it being fixed at
+whatever was set up initially. Mode is shared across the install but shown
+on each pod's own device, same reasoning as number.py's SoC limits.
 
 Standby here means "hold output at idle" -- confirmed this is exactly how
 the real cloud implements its own standby feature too (forcing
@@ -29,6 +29,7 @@ from .const import (
     DOMAIN,
     MANUFACTURER,
     MODE_BALANCE,
+    MODE_PLANNING,
     MODE_SPEED,
     MODE_STANDBY,
 )
@@ -38,7 +39,7 @@ MODE_SELECT_DESCRIPTION = SelectEntityDescription(
     key="mode",
     name="Mode",
     translation_key="planetpod_mode",
-    options=[MODE_BALANCE, MODE_SPEED, MODE_STANDBY],
+    options=[MODE_BALANCE, MODE_SPEED, MODE_STANDBY, MODE_PLANNING],
 )
 
 

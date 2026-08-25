@@ -17,6 +17,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from homeassistant import config_entries
@@ -943,3 +944,33 @@ async def test_last_get_sent_sensor_exposes_raw_response(hass: HomeAssistant):
     assert raw_response == response
     assert raw_response["Min_SOC"] == 20
     assert raw_response["Max_SOC"] == 85
+
+
+async def test_planning_mode_sends_current_hour_schedule_value(hass: HomeAssistant):
+    """Planning mode must read the current wall-clock hour's entry from the
+    24-hour schedule and send it as a held speed setpoint (subMode="speed",
+    same wire shape as manual Speed mode) -- the Planning dashboard card only
+    stages values into entry.options; nothing else applies them without this.
+    """
+    current_hour = dt_util.now().hour
+    entry = await _setup_local_entry(
+        hass, options={"mode": "planning", f"planning_hour_{current_hour:02d}": 1.7}
+    )
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    response = coordinator.get_response_for("PP-001")
+    assert response["solarSmart"] == {"subMode": "speed", "setpoint_kW": 1.7}
+
+
+async def test_planning_mode_defaults_to_zero_for_unset_hour(hass: HomeAssistant):
+    """An hour never staged via the Planning card must default to 0kW, not error."""
+    entry = await _setup_local_entry(hass, options={"mode": "planning"})
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    assert coordinator.effective_planning_power_kw == 0.0
+    response = coordinator.get_response_for("PP-001")
+    assert response["solarSmart"] == {"subMode": "speed", "setpoint_kW": 0.0}
