@@ -8,6 +8,19 @@ const COLOR_GRID = "#ef4444";
 const COLOR_BATTERY = "#22c55e";
 const COLOR_PLANNING = "#f97316";
 
+const CHARGE_STATUS_LABELS = { charge: "Charging", discharge: "Discharging", idle: "Idle" };
+const CHARGE_STATUS_COLORS = { charge: "#22c55e", discharge: "#f97316", idle: "#94a3b8" };
+
+function fmtSigned(value, unit) {
+  if (value == null || isNaN(value)) return "—";
+  return `${value > 0 ? "+" : ""}${value.toFixed(2)} ${unit || ""}`;
+}
+
+function fmtPlain(value, unit) {
+  if (value == null || isNaN(value)) return "—";
+  return `${value.toFixed(1)} ${unit || ""}`;
+}
+
 function dayBounds() {
   const start = new Date();
   start.setHours(0, 0, 0, 0);
@@ -50,6 +63,21 @@ class PlanetpodBaseCard extends HTMLElement {
         svg { width: 100%; height: 420px; display: block; overflow: visible; }
         .axis-label { font-size: 15px; fill: var(--secondary-text-color); }
         .legend { font-size: 16px; fill: var(--primary-text-color); }
+
+        .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+        .kpi-tile { background: var(--secondary-background-color); border-radius: 10px; padding: 14px; text-align: center; }
+        .kpi-label { font-size: 13px; color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: 0.04em; }
+        .kpi-value { font-size: 30px; font-weight: 600; margin: 6px 0 2px; color: var(--primary-text-color); }
+        .kpi-unit { font-size: 15px; font-weight: 400; margin-left: 3px; color: var(--secondary-text-color); }
+        .kpi-subtitle { display: block; font-size: 13px; margin-top: 2px; }
+        .kpi-subtitle.secondary { color: var(--secondary-text-color); }
+
+        .send-btn {
+          margin-top: 14px; padding: 10px 24px; border: none; border-radius: 8px;
+          background: var(--primary-color); color: var(--text-primary-color, #fff);
+          font-size: 14px; font-weight: 500; cursor: pointer;
+        }
+        .send-btn:disabled { opacity: 0.4; cursor: default; }
       </style>`;
   }
 }
@@ -211,14 +239,80 @@ class PlanetpodEnergyCard extends PlanetpodBaseCard {
   }
 }
 
+// ----------------------------------------------------------------- KPI card
+class PlanetpodKpiCard extends PlanetpodBaseCard {
+  _build() {
+    this._root(`<div id="kpis" class="kpi-grid"></div>`);
+    this._el = this.shadowRoot.getElementById("kpis");
+  }
+
+  _onHass() {
+    this._render();
+  }
+
+  _state(entityId) {
+    return this._hass.states[entityId];
+  }
+
+  _val(entityId) {
+    const s = this._state(entityId);
+    return s ? parseFloat(s.state) : NaN;
+  }
+
+  _renderTile(tile) {
+    let valueHtml, subtitleHtml = "";
+
+    if (tile.kind === "value_subtitle") {
+      const v = this._val(tile.entity);
+      const raw = this._state(tile.subtitle_entity)?.state;
+      const label = CHARGE_STATUS_LABELS[raw] || raw || "—";
+      const color = CHARGE_STATUS_COLORS[raw] || "var(--secondary-text-color)";
+      valueHtml = `${isNaN(v) ? "—" : v.toFixed(1)}<span class="kpi-unit">${tile.unit || ""}</span>`;
+      subtitleHtml = `<span class="kpi-subtitle" style="color:${color}">${label}</span>`;
+    } else if (tile.kind === "dual_signed") {
+      const primary = this._val(tile.primary_entity);
+      const secondary = this._val(tile.secondary_entity);
+      valueHtml = fmtSigned(primary, tile.unit);
+      subtitleHtml = `<span class="kpi-subtitle secondary">${tile.secondary_label}: ${fmtSigned(secondary, tile.unit)}</span>`;
+    } else if (tile.kind === "net_signed") {
+      const pos = this._val(tile.positive_entity);
+      const neg = this._val(tile.negative_entity);
+      const net = (isNaN(pos) ? 0 : pos) - (isNaN(neg) ? 0 : neg);
+      valueHtml = fmtSigned(net, tile.unit);
+      const direction = net > 0.01 ? "Importing" : net < -0.01 ? "Exporting" : "Balanced";
+      subtitleHtml = `<span class="kpi-subtitle secondary">${direction}</span>`;
+    } else {
+      valueHtml = fmtPlain(this._val(tile.entity), tile.unit);
+    }
+
+    return `
+      <div class="kpi-tile">
+        <div class="kpi-label">${tile.label}</div>
+        <div class="kpi-value">${valueHtml}</div>
+        ${subtitleHtml}
+      </div>`;
+  }
+
+  _render() {
+    const tiles = this._config.tiles || [];
+    this._el.innerHTML = tiles.map((t) => this._renderTile(t)).join("");
+  }
+}
+
 // ------------------------------------------------------------ Planning card
 class PlanetpodPlanningCard extends PlanetpodBaseCard {
   _build() {
     this._root(`
       <svg id="chart" viewBox="0 0 600 240" preserveAspectRatio="none" style="touch-action:none;"></svg>
+      <div style="text-align:center;">
+        <button id="send-btn" class="send-btn" disabled>Send Planning</button>
+      </div>
     `);
     this._svg = this.shadowRoot.getElementById("chart");
+    this._sendBtn = this.shadowRoot.getElementById("send-btn");
+    this._sendBtn.addEventListener("click", () => this._onSendClick());
     this._dragging = null;
+    this._dirty = false;
     this._values = new Array(24).fill(0);
     this.width = 600;
     this.height = 240;
@@ -230,7 +324,8 @@ class PlanetpodPlanningCard extends PlanetpodBaseCard {
   }
 
   _onHass() {
-    if (this._dragging !== null) return; // don't fight the user's drag
+    // Don't clobber a drag in progress, or edits staged but not yet sent.
+    if (this._dragging !== null || this._dirty) return;
     const cfg = this._config;
     const changed = cfg.entities.some((id, h) => {
       const state = this._hass.states[id];
@@ -285,13 +380,23 @@ class PlanetpodPlanningCard extends PlanetpodBaseCard {
 
   _onPointerUp() {
     if (this._dragging === null) return;
-    const hour = this._dragging;
-    const entityId = this._config.entities[hour];
-    this._hass.callService("number", "set_value", {
-      entity_id: entityId,
-      value: this._values[hour],
-    });
     this._dragging = null;
+    this._dirty = true;
+    this._sendBtn.disabled = false;
+    this._render();
+  }
+
+  async _onSendClick() {
+    this._sendBtn.disabled = true;
+    this._sendBtn.textContent = "Sending…";
+    const cfg = this._config;
+    await Promise.all(
+      cfg.entities.map((id, hour) =>
+        this._hass.callService("number", "set_value", { entity_id: id, value: this._values[hour] })
+      )
+    );
+    this._dirty = false;
+    this._sendBtn.textContent = "Send Planning";
   }
 
   _render() {
@@ -338,11 +443,13 @@ class PlanetpodPlanningCard extends PlanetpodBaseCard {
 
 customElements.define("planetpod-soc-card", PlanetpodSocCard);
 customElements.define("planetpod-energy-card", PlanetpodEnergyCard);
+customElements.define("planetpod-kpi-card", PlanetpodKpiCard);
 customElements.define("planetpod-planning-card", PlanetpodPlanningCard);
 
 window.customCards = window.customCards || [];
 window.customCards.push(
   { type: "planetpod-soc-card", name: "Planetpod SoC", description: "State of charge over one day with limit lines." },
   { type: "planetpod-energy-card", name: "Planetpod Energy", description: "Hourly grid/battery energy bars." },
+  { type: "planetpod-kpi-card", name: "Planetpod KPIs", description: "Key stat tiles: SoC, power, temperature, P1." },
   { type: "planetpod-planning-card", name: "Planetpod Planning", description: "Draggable hourly power planning." }
 );
