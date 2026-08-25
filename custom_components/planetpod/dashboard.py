@@ -124,7 +124,7 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
         "title": f"Planetpod {serial}",
         "path": f"pod-{serial}",
         "type": "sections",
-        "max_columns": 4,
+        "max_columns": 1,
         "sections": [
             {
                 "type": "grid",
