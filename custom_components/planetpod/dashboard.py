@@ -120,14 +120,29 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
         if (e := _eid(registry, entry_id, serial, "button", key))
     ]
 
+    activity_entities = [
+        e
+        for e in (
+            *entity_col_1,
+            *entity_col_2,
+            *entity_col_3,
+            *buttons,
+            soc,
+            deployed_power,
+            requested_power,
+        )
+        if e
+    ]
+
     return {
         "title": f"Planetpod {serial}",
         "path": f"pod-{serial}",
         "type": "sections",
-        "max_columns": 1,
+        "max_columns": 4,
         "sections": [
             {
                 "type": "grid",
+                "column_span": 4,
                 "cards": [
                     {"type": "heading", "heading": "Status", "icon": "mdi:battery-charging-high"},
                     {
@@ -139,6 +154,7 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
             },
             {
                 "type": "grid",
+                "column_span": 4,
                 "cards": [
                     {"type": "heading", "heading": "Charts", "icon": "mdi:chart-line"},
                     {
@@ -165,16 +181,22 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
             },
             {
                 "type": "grid",
+                "column_span": 4,
                 "cards": [
                     {"type": "heading", "heading": "Details", "icon": "mdi:cog-outline"},
-                    {"type": "entities", "entities": entity_col_1, "grid_options": {"columns": 3}},
-                    {"type": "entities", "entities": entity_col_2, "grid_options": {"columns": 3}},
-                    {"type": "entities", "entities": entity_col_3, "grid_options": {"columns": 3}},
+                    {"type": "entities", "entities": entity_col_1, "grid_options": {"columns": 2, "rows": 6}},
+                    {"type": "entities", "entities": entity_col_2, "grid_options": {"columns": 2, "rows": 6}},
+                    {"type": "entities", "entities": entity_col_3, "grid_options": {"columns": 2, "rows": 6}},
                     {
                         "type": "grid",
                         "columns": 1,
                         "cards": [{"type": "button", "entity": e} for e in buttons],
-                        "grid_options": {"columns": 3},
+                        "grid_options": {"columns": 2, "rows": 6},
+                    },
+                    {
+                        "type": "logbook",
+                        "entities": activity_entities,
+                        "grid_options": {"columns": 4, "rows": 6},
                     },
                 ],
             },
