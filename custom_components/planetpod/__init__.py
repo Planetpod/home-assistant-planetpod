@@ -16,6 +16,7 @@ from .api_local import ensure_local_view_registered
 from .const import CONF_CONNECTION_TYPE, CONNECTION_TYPE_LOCAL, DOMAIN, PENDING_PODS_KEY
 from .coordinator import PlanetpodDataUpdateCoordinator
 from .coordinator_local import PlanetpodLocalCoordinator
+from .dashboard import async_ensure_dashboard
 
 _LOGGER: logging.Logger = logging.getLogger(__name__)
 
@@ -107,6 +108,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Keep the bundled dashboard's layout in sync with the code -- re-provisioned
+    # whenever the set of known pods changes (new pod added, or entities for an
+    # existing pod register for the first time after this reload).
+    known_dashboard_serials: set[str] = set()
+
+    def _maybe_update_dashboard() -> None:
+        pods: list[dict] = coordinator.data.get("pods", []) if coordinator.data else []
+        serials = {s for pod in pods if (s := pod.get("battery", {}).get("serial_number"))}
+        if serials and serials != known_dashboard_serials:
+            known_dashboard_serials.clear()
+            known_dashboard_serials.update(serials)
+            hass.async_create_task(
+                async_ensure_dashboard(hass, entry.entry_id, sorted(serials))
+            )
+
+    entry.async_on_unload(coordinator.async_add_listener(_maybe_update_dashboard))
+    _maybe_update_dashboard()
 
     _LOGGER.warning("PLANETPOD: async_setup_entry() finished for entry %s", entry.entry_id)
     return True
