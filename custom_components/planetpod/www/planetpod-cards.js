@@ -47,7 +47,7 @@ class PlanetpodBaseCard extends HTMLElement {
       </ha-card>
       <style>
         .card-content { padding: 8px 16px 16px; }
-        svg { width: 100%; height: auto; display: block; overflow: visible; }
+        svg { width: 100%; height: 320px; display: block; overflow: visible; }
         .axis-label { font-size: 10px; fill: var(--secondary-text-color); }
         .legend { font-size: 12px; fill: var(--primary-text-color); }
       </style>`;
@@ -220,9 +220,9 @@ class PlanetpodPlanningCard extends PlanetpodBaseCard {
     this._svg = this.shadowRoot.getElementById("chart");
     this._dragging = null;
     this._values = new Array(24).fill(0);
-    this._width = 600;
-    this._height = 240;
-    this._pad = 40;
+    this.width = 600;
+    this.height = 240;
+    this.pad = 40;
     this._svg.addEventListener("pointerdown", (e) => this._onPointerDown(e));
     this._svg.addEventListener("pointermove", (e) => this._onPointerMove(e));
     this._svg.addEventListener("pointerup", (e) => this._onPointerUp(e));
@@ -260,9 +260,9 @@ class PlanetpodPlanningCard extends PlanetpodBaseCard {
 
   _hourForClientX(clientX) {
     const rect = this._svg.getBoundingClientRect();
-    const scaleX = this._width / rect.width;
+    const scaleX = this.width / rect.width;
     const svgX = (clientX - rect.left) * scaleX;
-    const frac = ((svgX - this._pad) / (this._width - 2 * this._pad)) * 24;
+    const frac = ((svgX - this.pad) / (this.width - 2 * this.pad)) * 24;
     return Math.max(0, Math.min(23, Math.round(frac - 0.5)));
   }
 
@@ -277,7 +277,7 @@ class PlanetpodPlanningCard extends PlanetpodBaseCard {
   _onPointerMove(e) {
     if (this._dragging === null) return;
     const rect = this._svg.getBoundingClientRect();
-    const scaleY = this._height / rect.height;
+    const scaleY = this.height / rect.height;
     const svgY = (e.clientY - rect.top) * scaleY;
     this._values[this._dragging] = this._kwFor(svgY);
     this._render();
