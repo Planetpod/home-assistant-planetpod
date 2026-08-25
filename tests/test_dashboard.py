@@ -77,8 +77,12 @@ async def test_build_dashboard_config_builds_view_once_entities_registered(hass:
         assert "{{" in tile["secondary"]
 
     charts_section, details_section = view["sections"][1], view["sections"][2]
-    soc_card = next(c for c in charts_section["cards"] if c["type"] == "custom:planetpod-soc-card")
-    assert soc_card["entity"].startswith("sensor.")
+    apex_cards = [c for c in charts_section["cards"] if c["type"] == "custom:apexcharts-card"]
+    assert [c["header"]["title"] for c in apex_cards] == ["SoC (%)", "Energy Usage"]
+    soc_card = apex_cards[0]
+    assert soc_card["series"][0]["entity"].startswith("sensor.")
+    energy_card = apex_cards[1]
+    assert all(s["entity"].startswith("sensor.") for s in energy_card["series"])
 
     planning_card = next(
         c for c in charts_section["cards"] if c["type"] == "custom:planetpod-planning-card"
