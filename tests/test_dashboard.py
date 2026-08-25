@@ -77,15 +77,20 @@ async def test_build_dashboard_config_builds_view_once_entities_registered(hass:
     assert soc_tile["entity"].startswith("sensor.")
     assert soc_tile["subtitle_entity"].startswith("sensor.")
 
-    charts_section, planning_section = view["sections"][1], view["sections"][2]
+    charts_section, details_section = view["sections"][1], view["sections"][2]
     soc_card = next(c for c in charts_section["cards"] if c["type"] == "custom:planetpod-soc-card")
     assert soc_card["entity"].startswith("sensor.")
 
     planning_card = next(
-        c for c in planning_section["cards"] if c["type"] == "custom:planetpod-planning-card"
+        c for c in charts_section["cards"] if c["type"] == "custom:planetpod-planning-card"
     )
     assert len(planning_card["entities"]) == 24
     assert all(e.startswith("number.") for e in planning_card["entities"])
+
+    entities_cards = [c for c in details_section["cards"] if c["type"] == "entities"]
+    assert len(entities_cards) == 3
+    button_grid = next(c for c in details_section["cards"] if c["type"] == "grid")
+    assert len(button_grid["cards"]) == 3
 
 
 async def test_build_dashboard_config_skips_unknown_pod(hass: HomeAssistant):
