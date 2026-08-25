@@ -47,9 +47,9 @@ class PlanetpodBaseCard extends HTMLElement {
       </ha-card>
       <style>
         .card-content { padding: 8px 16px 16px; }
-        svg { width: 100%; height: 320px; display: block; overflow: visible; }
-        .axis-label { font-size: 10px; fill: var(--secondary-text-color); }
-        .legend { font-size: 12px; fill: var(--primary-text-color); }
+        svg { width: 100%; height: 420px; display: block; overflow: visible; }
+        .axis-label { font-size: 15px; fill: var(--secondary-text-color); }
+        .legend { font-size: 16px; fill: var(--primary-text-color); }
       </style>`;
   }
 }
@@ -57,7 +57,7 @@ class PlanetpodBaseCard extends HTMLElement {
 // ---------------------------------------------------------------- SoC card
 class PlanetpodSocCard extends PlanetpodBaseCard {
   _build() {
-    this._root(`<svg id="chart" viewBox="0 0 600 220"></svg>`);
+    this._root(`<svg id="chart" viewBox="0 0 600 220" preserveAspectRatio="none"></svg>`);
     this._svg = this.shadowRoot.getElementById("chart");
     this._lastFetch = 0;
   }
@@ -126,7 +126,7 @@ class PlanetpodSocCard extends PlanetpodBaseCard {
 // ------------------------------------------------------------- Energy card
 class PlanetpodEnergyCard extends PlanetpodBaseCard {
   _build() {
-    this._root(`<svg id="chart" viewBox="0 0 600 220"></svg>`);
+    this._root(`<svg id="chart" viewBox="0 0 600 220" preserveAspectRatio="none"></svg>`);
     this._svg = this.shadowRoot.getElementById("chart");
     this._lastFetch = 0;
   }
@@ -215,7 +215,7 @@ class PlanetpodEnergyCard extends PlanetpodBaseCard {
 class PlanetpodPlanningCard extends PlanetpodBaseCard {
   _build() {
     this._root(`
-      <svg id="chart" viewBox="0 0 600 240" style="touch-action:none;"></svg>
+      <svg id="chart" viewBox="0 0 600 240" preserveAspectRatio="none" style="touch-action:none;"></svg>
     `);
     this._svg = this.shadowRoot.getElementById("chart");
     this._dragging = null;

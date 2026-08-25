@@ -120,7 +120,7 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
                         "entity": soc,
                         "upper_limit_entity": upper,
                         "lower_limit_entity": lower,
-                        "grid_options": {"columns": 6, "rows": 8},
+                        "grid_options": {"columns": "full", "rows": 8},
                     },
                     {
                         "type": "custom:planetpod-energy-card",
@@ -128,7 +128,7 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
                         "grid_delivered_entity": grid_delivered,
                         "grid_returned_entity": grid_returned,
                         "battery_entity": battery_net,
-                        "grid_options": {"columns": 6, "rows": 8},
+                        "grid_options": {"columns": "full", "rows": 8},
                     },
                 ],
             },
