@@ -60,7 +60,7 @@ class PlanetpodBaseCard extends HTMLElement {
       </ha-card>
       <style>
         .card-content { padding: 8px 16px 16px; }
-        svg { width: 100%; height: 420px; display: block; overflow: visible; }
+        svg { width: 100%; height: auto; display: block; overflow: visible; }
         .axis-label { font-size: 15px; fill: var(--secondary-text-color); }
         .legend { font-size: 16px; fill: var(--primary-text-color); }
 
@@ -85,7 +85,7 @@ class PlanetpodBaseCard extends HTMLElement {
 // ---------------------------------------------------------------- SoC card
 class PlanetpodSocCard extends PlanetpodBaseCard {
   _build() {
-    this._root(`<svg id="chart" viewBox="0 0 600 220" preserveAspectRatio="none"></svg>`);
+    this._root(`<svg id="chart" viewBox="0 0 600 220"></svg>`);
     this._svg = this.shadowRoot.getElementById("chart");
     this._lastFetch = 0;
   }
@@ -154,7 +154,7 @@ class PlanetpodSocCard extends PlanetpodBaseCard {
 // ------------------------------------------------------------- Energy card
 class PlanetpodEnergyCard extends PlanetpodBaseCard {
   _build() {
-    this._root(`<svg id="chart" viewBox="0 0 600 220" preserveAspectRatio="none"></svg>`);
+    this._root(`<svg id="chart" viewBox="0 0 600 220"></svg>`);
     this._svg = this.shadowRoot.getElementById("chart");
     this._lastFetch = 0;
   }
@@ -303,7 +303,7 @@ class PlanetpodKpiCard extends PlanetpodBaseCard {
 class PlanetpodPlanningCard extends PlanetpodBaseCard {
   _build() {
     this._root(`
-      <svg id="chart" viewBox="0 0 600 240" preserveAspectRatio="none" style="touch-action:none;"></svg>
+      <svg id="chart" viewBox="0 0 600 240" style="touch-action:none;"></svg>
       <div style="text-align:center;">
         <button id="send-btn" class="send-btn" disabled>Send Planning</button>
       </div>
@@ -390,13 +390,20 @@ class PlanetpodPlanningCard extends PlanetpodBaseCard {
     this._sendBtn.disabled = true;
     this._sendBtn.textContent = "Sending…";
     const cfg = this._config;
-    await Promise.all(
-      cfg.entities.map((id, hour) =>
-        this._hass.callService("number", "set_value", { entity_id: id, value: this._values[hour] })
-      )
-    );
-    this._dirty = false;
-    this._sendBtn.textContent = "Send Planning";
+    try {
+      await Promise.all(
+        cfg.entities.map((id, hour) =>
+          this._hass.callService("number", "set_value", { entity_id: id, value: this._values[hour] })
+        )
+      );
+      this._dirty = false;
+      this._sendBtn.textContent = "Send Planning";
+      this._sendBtn.disabled = true;
+    } catch (err) {
+      console.error("PLANETPOD: Send Planning failed", err);
+      this._sendBtn.textContent = "Send failed — retry";
+      this._sendBtn.disabled = false;
+    }
   }
 
   _render() {
