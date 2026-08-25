@@ -73,7 +73,7 @@ class PlanetpodBaseCard extends HTMLElement {
         .kpi-subtitle.secondary { color: var(--secondary-text-color); }
 
         .send-btn {
-          margin-top: 14px; padding: 10px 24px; border: none; border-radius: 8px;
+          margin-top: 6px; padding: 6px 18px; border: none; border-radius: 8px;
           background: var(--primary-color); color: var(--text-primary-color, #fff);
           font-size: 14px; font-weight: 500; cursor: pointer;
         }
@@ -303,7 +303,7 @@ class PlanetpodKpiCard extends PlanetpodBaseCard {
 class PlanetpodPlanningCard extends PlanetpodBaseCard {
   _build() {
     this._root(`
-      <svg id="chart" viewBox="0 0 600 240" style="touch-action:none;"></svg>
+      <svg id="chart" viewBox="0 0 600 220" style="touch-action:none;"></svg>
       <div style="text-align:center;">
         <button id="send-btn" class="send-btn" disabled>Send Planning</button>
       </div>
@@ -315,7 +315,7 @@ class PlanetpodPlanningCard extends PlanetpodBaseCard {
     this._dirty = false;
     this._values = new Array(24).fill(0);
     this.width = 600;
-    this.height = 240;
+    this.height = 220;
     this.pad = 40;
     this._svg.addEventListener("pointerdown", (e) => this._onPointerDown(e));
     this._svg.addEventListener("pointermove", (e) => this._onPointerMove(e));
