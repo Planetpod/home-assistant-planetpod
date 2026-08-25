@@ -69,3 +69,10 @@ HTTP_VIEW_URL = "/planetpod"
 PENDING_PODS_KEY = "_pending_pods"
 
 ATTR_ATTRIBUTION_LOCAL = "Data provided by your Planetpod (local)"
+
+# Day-ahead planning: 24 writable power setpoints (one per hour, in
+# entry.options as "planning_hour_00".."planning_hour_23"), driven by the
+# Planning dashboard card. Reuses the Speed Setpoint power range since both
+# represent a requested kW the pod should hold.
+PLANNING_HOURS: tuple[int, ...] = tuple(range(24))
+DEFAULT_PLANNING_POWER_KW = 0.0
