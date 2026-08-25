@@ -106,22 +106,17 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
         },
     ]
 
-    status_entities = [
-        e
-        for key, domain in (
-            ("mode", "select"),
-            ("online", "sensor"),
-            ("max_charge_power_kw", "sensor"),
-            ("max_discharge_power_kw", "sensor"),
-            ("relay_status", "sensor"),
-            ("soc_upper_limit_pct", "number"),
-            ("soc_lower_limit_pct", "number"),
-        )
-        if (e := _eid(registry, entry_id, serial, domain, key))
-    ]
+    def _eids(*keys_domains: tuple[str, str]) -> list[str]:
+        return [e for key, domain in keys_domains if (e := _eid(registry, entry_id, serial, domain, key))]
+
+    entity_col_1 = _eids(("mode", "select"), ("online", "sensor"))
+    entity_col_2 = _eids(
+        ("max_charge_power_kw", "sensor"), ("max_discharge_power_kw", "sensor"), ("relay_status", "sensor")
+    )
+    entity_col_3 = _eids(("soc_upper_limit_pct", "number"), ("soc_lower_limit_pct", "number"))
     buttons = [
         e
-        for key in ("reboot", "calibration", "turn_off_bms")
+        for key in ("reboot", "toggle_calibration", "turn_off_bms")
         if (e := _eid(registry, entry_id, serial, "button", key))
     ]
 
@@ -129,7 +124,7 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
         "title": f"Planetpod {serial}",
         "path": f"pod-{serial}",
         "type": "sections",
-        "max_columns": 2,
+        "max_columns": 4,
         "sections": [
             {
                 "type": "grid",
@@ -140,12 +135,6 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
                         "tiles": kpi_tiles,
                         "grid_options": {"columns": "full", "rows": 4},
                     },
-                    {"type": "entities", "entities": status_entities},
-                    {
-                        "type": "grid",
-                        "columns": 3,
-                        "cards": [{"type": "button", "entity": e} for e in buttons],
-                    },
                 ],
             },
             {
@@ -154,32 +143,38 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
                     {"type": "heading", "heading": "Charts", "icon": "mdi:chart-line"},
                     {
                         "type": "custom:planetpod-soc-card",
-                        "title": "State of Charge",
                         "entity": soc,
                         "upper_limit_entity": upper,
                         "lower_limit_entity": lower,
-                        "grid_options": {"columns": "full", "rows": 8},
+                        "grid_options": {"columns": 4, "rows": 8},
                     },
                     {
                         "type": "custom:planetpod-energy-card",
-                        "title": "Energy per hour",
                         "grid_delivered_entity": grid_delivered,
                         "grid_returned_entity": grid_returned,
                         "battery_entity": battery_net,
-                        "grid_options": {"columns": "full", "rows": 8},
+                        "grid_options": {"columns": 4, "rows": 8},
+                    },
+                    {
+                        "type": "custom:planetpod-planning-card",
+                        "entities": planning_entities,
+                        "max_power_kw": MAX_CHARGE_POWER_KW,
+                        "grid_options": {"columns": 4, "rows": 8},
                     },
                 ],
             },
             {
                 "type": "grid",
                 "cards": [
-                    {"type": "heading", "heading": "Planning", "icon": "mdi:gesture-tap-hold"},
+                    {"type": "heading", "heading": "Details", "icon": "mdi:cog-outline"},
+                    {"type": "entities", "entities": entity_col_1, "grid_options": {"columns": 3}},
+                    {"type": "entities", "entities": entity_col_2, "grid_options": {"columns": 3}},
+                    {"type": "entities", "entities": entity_col_3, "grid_options": {"columns": 3}},
                     {
-                        "type": "custom:planetpod-planning-card",
-                        "title": "Planning",
-                        "entities": planning_entities,
-                        "max_power_kw": MAX_CHARGE_POWER_KW,
-                        "grid_options": {"columns": "full", "rows": 8},
+                        "type": "grid",
+                        "columns": 1,
+                        "cards": [{"type": "button", "entity": e} for e in buttons],
+                        "grid_options": {"columns": 3},
                     },
                 ],
             },
