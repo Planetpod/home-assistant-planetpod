@@ -190,6 +190,7 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
                     {
                         "type": "grid",
                         "columns": 1,
+                        "square": False,
                         "cards": [{"type": "button", "entity": e} for e in buttons],
                         "grid_options": {"columns": 8, "rows": "auto"},
                     },
