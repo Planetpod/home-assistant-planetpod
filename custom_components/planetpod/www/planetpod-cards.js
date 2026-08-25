@@ -128,7 +128,7 @@ class PlanetpodSocCard extends PlanetpodBaseCard {
       .map(
         (pct) =>
           `<line x1="${pad}" x2="${width - pad}" y1="${yFor(pct)}" y2="${yFor(pct)}" stroke="var(--divider-color)" stroke-width="1"/>
-           <text class="axis-label" x="2" y="${yFor(pct) + 3}">${pct}%</text>`
+           <text class="axis-label" x="2" y="${yFor(pct) + 3}">${pct}</text>`
       )
       .join("");
 
@@ -226,13 +226,21 @@ class PlanetpodEnergyCard extends PlanetpodBaseCard {
       )
       .join("");
 
+    const yTicks = [-maxAbs, -maxAbs / 2, 0, maxAbs / 2, maxAbs]
+      .map((v) => {
+        const y = zeroY - v * scale;
+        return `<line x1="${pad}" x2="${width - pad}" y1="${y}" y2="${y}" stroke="var(--divider-color)" stroke-width="1"/>
+                <text class="axis-label" x="2" y="${y + 3}">${v.toFixed(1)}</text>`;
+      })
+      .join("");
+
     this._svg.innerHTML = `
-      <text class="legend" x="${pad}" y="14">Energy per hour</text>
       <rect x="${width - 150}" y="4" width="10" height="10" fill="${COLOR_GRID}"/>
       <text class="legend" x="${width - 136}" y="13">Grid</text>
       <rect x="${width - 90}" y="4" width="10" height="10" fill="${COLOR_BATTERY}"/>
       <text class="legend" x="${width - 76}" y="13">Battery</text>
-      <line x1="${pad}" x2="${width - pad}" y1="${zeroY}" y2="${zeroY}" stroke="var(--divider-color)" stroke-width="1.5"/>
+      ${yTicks}
+      <line x1="${pad}" x2="${width - pad}" y1="${zeroY}" y2="${zeroY}" stroke="var(--primary-text-color)" stroke-width="1"/>
       ${bars}
       ${hourTicks}
     `;
@@ -303,7 +311,7 @@ class PlanetpodKpiCard extends PlanetpodBaseCard {
 class PlanetpodPlanningCard extends PlanetpodBaseCard {
   _build() {
     this._root(`
-      <svg id="chart" viewBox="0 0 600 220" style="touch-action:none;"></svg>
+      <svg id="chart" viewBox="0 0 600 190" style="touch-action:none;"></svg>
       <div style="text-align:center;">
         <button id="send-btn" class="send-btn" disabled>Send Planning</button>
       </div>

@@ -144,7 +144,6 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
                 "type": "grid",
                 "column_span": 4,
                 "cards": [
-                    {"type": "heading", "heading": "Status", "icon": "mdi:battery-charging-high"},
                     {
                         "type": "custom:planetpod-kpi-card",
                         "tiles": kpi_tiles,
@@ -156,9 +155,9 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
                 "type": "grid",
                 "column_span": 4,
                 "cards": [
-                    {"type": "heading", "heading": "Charts", "icon": "mdi:chart-line"},
                     {
                         "type": "custom:planetpod-soc-card",
+                        "title": "SoC (%)",
                         "entity": soc,
                         "upper_limit_entity": upper,
                         "lower_limit_entity": lower,
@@ -166,6 +165,7 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
                     },
                     {
                         "type": "custom:planetpod-energy-card",
+                        "title": "Energy Usage",
                         "grid_delivered_entity": grid_delivered,
                         "grid_returned_entity": grid_returned,
                         "battery_entity": battery_net,
@@ -173,6 +173,7 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
                     },
                     {
                         "type": "custom:planetpod-planning-card",
+                        "title": "Planning",
                         "entities": planning_entities,
                         "max_power_kw": MAX_CHARGE_POWER_KW,
                         "grid_options": {"columns": 16, "rows": "auto"},
@@ -183,15 +184,16 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
                 "type": "grid",
                 "column_span": 4,
                 "cards": [
-                    {"type": "heading", "heading": "Details", "icon": "mdi:cog-outline"},
                     {"type": "entities", "entities": entity_col_1, "grid_options": {"columns": 8, "rows": "auto"}},
                     {"type": "entities", "entities": entity_col_2, "grid_options": {"columns": 8, "rows": "auto"}},
                     {"type": "entities", "entities": entity_col_3, "grid_options": {"columns": 8, "rows": "auto"}},
                     {
                         "type": "grid",
-                        "columns": 1,
+                        "columns": 3,
                         "square": False,
-                        "cards": [{"type": "button", "entity": e} for e in buttons],
+                        "cards": [
+                            {"type": "button", "entity": e, "show_state": False} for e in buttons
+                        ],
                         "grid_options": {"columns": 8, "rows": "auto"},
                     },
                     {
