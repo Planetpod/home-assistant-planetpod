@@ -75,53 +75,34 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
     ):
         return None
 
-
     kpi_tiles = [
         {
-            "type": "custom:mushroom-template-card",
-            "primary": "State of Charge",
-            "secondary": (
-                f"{{{{ states('{soc}') | float(0) | round(1) }}}}% · "
-                f"{{{{ {{'charge':'Charging','discharge':'Discharging','idle':'Idle'}}"
-                f".get(states('{charge_status}'), states('{charge_status}')) }}}}"
-            ),
-            "icon": "mdi:battery-medium",
-            "icon_color": (
-                f"{{{{ {{'charge':'#44F4B3','discharge':'#ffc53a'}}"
-                f".get(states('{charge_status}'), 'grey') }}}}"
-            ),
-            "grid_options": {"columns": 6, "rows": "auto"},
+            "kind": "value_subtitle",
+            "label": "State of Charge",
+            "entity": soc,
+            "unit": "%",
+            "subtitle_entity": charge_status,
         },
         {
-            "type": "custom:mushroom-template-card",
-            "primary": "Deployed Power",
-            "secondary": (
-                f"{{{{ '%+.2f'|format(states('{deployed_power}')|float(0)) }}}} kW · "
-                f"Requested: {{{{ '%+.2f'|format(states('{requested_power}')|float(0)) }}}} kW"
-            ),
-            "icon": "mdi:flash",
-            "icon_color": "#5551fe",
-            "grid_options": {"columns": 6, "rows": "auto"},
+            "kind": "dual_signed",
+            "label": "Deployed Power",
+            "primary_entity": deployed_power,
+            "secondary_entity": requested_power,
+            "secondary_label": "Requested",
+            "unit": "kW",
         },
         {
-            "type": "custom:mushroom-template-card",
-            "primary": "Temperature",
-            "secondary": f"{{{{ states('{battery_temp}')|float(0)|round(1) }}}} °C",
-            "icon": "mdi:thermometer",
-            "icon_color": "#ffc53a",
-            "grid_options": {"columns": 6, "rows": "auto"},
+            "kind": "value",
+            "label": "Temperature",
+            "entity": battery_temp,
+            "unit": "°C",
         },
         {
-            "type": "custom:mushroom-template-card",
-            "primary": "P1 Meter",
-            "secondary": (
-                f"{{% set net = states('{p1_delivered}')|float(0) - states('{p1_returned}')|float(0) %}}"
-                f"{{{{ '%+.2f'|format(net) }}}} kW · "
-                f"{{{{ 'Importing' if net > 0.01 else ('Exporting' if net < -0.01 else 'Balanced') }}}}"
-            ),
-            "icon": "mdi:transmission-tower",
-            "icon_color": "#f8333c",
-            "grid_options": {"columns": 6, "rows": "auto"},
+            "kind": "net_signed",
+            "label": "P1 Meter",
+            "positive_entity": p1_delivered,
+            "negative_entity": p1_returned,
+            "unit": "kW",
         },
     ]
 
@@ -162,9 +143,13 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
             {
                 "type": "grid",
                 "column_span": 4,
-                "square": False,
-                "columns": 24,
-                "cards": kpi_tiles,
+                "cards": [
+                    {
+                        "type": "custom:planetpod-kpi-card",
+                        "tiles": kpi_tiles,
+                        "grid_options": {"columns": "full", "rows": "auto"},
+                    },
+                ],
             },
             {
                 "type": "grid",
@@ -199,39 +184,15 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
                 "type": "grid",
                 "column_span": 4,
                 "cards": [
+                    {"type": "entities", "entities": entity_col_1, "grid_options": {"columns": 8, "rows": "auto"}},
+                    {"type": "entities", "entities": entity_col_2, "grid_options": {"columns": 8, "rows": "auto"}},
+                    {"type": "entities", "entities": entity_col_3, "grid_options": {"columns": 8, "rows": "auto"}},
                     {
-                        "type": "vertical-stack",
+                        "type": "grid",
+                        "columns": 3,
+                        "square": False,
                         "cards": [
-                            {"type": "custom:mushroom-entity-card", "entity": e}
-                            for e in entity_col_1
-                        ],
-                        "grid_options": {"columns": 8, "rows": "auto"},
-                    },
-                    {
-                        "type": "vertical-stack",
-                        "cards": [
-                            {"type": "custom:mushroom-entity-card", "entity": e}
-                            for e in entity_col_2
-                        ],
-                        "grid_options": {"columns": 8, "rows": "auto"},
-                    },
-                    {
-                        "type": "vertical-stack",
-                        "cards": [
-                            {"type": "custom:mushroom-entity-card", "entity": e}
-                            for e in entity_col_3
-                        ],
-                        "grid_options": {"columns": 8, "rows": "auto"},
-                    },
-                    {
-                        "type": "vertical-stack",
-                        "cards": [
-                            {
-                                "type": "custom:mushroom-entity-card",
-                                "entity": e,
-                                "icon_color": "#f8333c",
-                            }
-                            for e in buttons
+                            {"type": "button", "entity": e, "show_state": False} for e in buttons
                         ],
                         "grid_options": {"columns": 8, "rows": "auto"},
                     },
