@@ -1,6 +1,7 @@
 """The Planetpod integration."""
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -26,7 +27,15 @@ PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.NUMBER, Platform.SELECT, 
 # integration's www/ folder and self-registered as a frontend resource on
 # every boot -- avoids asking the user to add a dashboard resource by hand,
 # the way most HACS cards require.
-_CARD_URL = f"/{DOMAIN}_static/planetpod-cards.js"
+#
+# The URL carries the manifest version as a cache-busting query param:
+# without it, browsers keep serving whatever planetpod-cards.js they first
+# fetched even after an update ships new/changed card classes, and Lovelace
+# then reports "Configuration error" for any custom element that no longer
+# matches what's actually on disk.
+def _card_url() -> str:
+    manifest = json.loads((Path(__file__).parent / "manifest.json").read_text())
+    return f"/{DOMAIN}_static/planetpod-cards.js?v={manifest['version']}"
 
 
 async def _async_register_frontend_resources(hass: HomeAssistant) -> None:
@@ -43,7 +52,7 @@ async def _async_register_frontend_resources(hass: HomeAssistant) -> None:
     # in a real HA install, but isn't guaranteed present in a minimal test
     # environment -- skip registering the resource rather than failing setup.
     try:
-        add_extra_js_url(hass, _CARD_URL)
+        add_extra_js_url(hass, _card_url())
     except KeyError:
         _LOGGER.debug("PLANETPOD: frontend component not loaded, skipping dashboard resource registration")
 
