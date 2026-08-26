@@ -2,14 +2,24 @@
 // Plain SVG, no external chart library -- served by the integration itself
 // (see __init__.py's _async_register_frontend_resources).
 
-const COLOR_SOC = "#3b82f6";
+// Planetpod brand palette (PlanetpodAppV2/tamagui.config.ts) — hardcoded rather than
+// via an HA theme, since HA has no API to create theme YAML and this session has no
+// filesystem access to /config to write one by hand.
+const PP_GREEN = "#44F4B3";
+const PP_YELLOW = "#ffc53a";
+const PP_BLUE = "#5551fe";
+const PP_RED = "#f8333c";
+const PP_BORDER = "#88888840";
+const PP_FONT = "'Manrope', var(--paper-font-common-base_-_font-family, sans-serif)";
+
+const COLOR_SOC = PP_BLUE;
 const COLOR_LIMIT = "#94a3b8";
-const COLOR_GRID = "#ef4444";
-const COLOR_BATTERY = "#22c55e";
-const COLOR_PLANNING = "#f97316";
+const COLOR_GRID = PP_RED;
+const COLOR_BATTERY = PP_GREEN;
+const COLOR_PLANNING = PP_YELLOW;
 
 const CHARGE_STATUS_LABELS = { charge: "Charging", discharge: "Discharging", idle: "Idle" };
-const CHARGE_STATUS_COLORS = { charge: "#22c55e", discharge: "#f97316", idle: "#94a3b8" };
+const CHARGE_STATUS_COLORS = { charge: PP_GREEN, discharge: PP_YELLOW, idle: "#94a3b8" };
 
 function fmtSigned(value, unit) {
   if (value == null || isNaN(value)) return "—";
@@ -59,23 +69,31 @@ class PlanetpodBaseCard extends HTMLElement {
         <div class="card-content">${bodyHtml}</div>
       </ha-card>
       <style>
-        .card-content { padding: 8px 16px 16px; }
+        @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700&display=swap');
+
+        ha-card {
+          font-family: ${PP_FONT};
+          border-radius: 18px;
+          border: 1px solid ${PP_BORDER};
+        }
+        .card-content { padding: 8px 16px 16px; font-family: ${PP_FONT}; }
         svg { width: 100%; height: auto; display: block; overflow: visible; }
+        svg text { font-family: ${PP_FONT}; }
         .axis-label { font-size: 15px; fill: var(--secondary-text-color); }
         .legend { font-size: 16px; fill: var(--primary-text-color); }
 
         .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
-        .kpi-tile { background: var(--secondary-background-color); border-radius: 10px; padding: 14px; text-align: center; }
+        .kpi-tile { background: var(--secondary-background-color); border-radius: 14px; border: 1px solid ${PP_BORDER}; padding: 14px; text-align: center; }
         .kpi-label { font-size: 13px; color: var(--secondary-text-color); text-transform: uppercase; letter-spacing: 0.04em; }
-        .kpi-value { font-size: 30px; font-weight: 600; margin: 6px 0 2px; color: var(--primary-text-color); }
+        .kpi-value { font-size: 30px; font-weight: 700; margin: 6px 0 2px; color: var(--primary-text-color); }
         .kpi-unit { font-size: 15px; font-weight: 400; margin-left: 3px; color: var(--secondary-text-color); }
         .kpi-subtitle { display: block; font-size: 13px; margin-top: 2px; }
         .kpi-subtitle.secondary { color: var(--secondary-text-color); }
 
         .send-btn {
           margin-top: 6px; padding: 6px 18px; border: none; border-radius: 8px;
-          background: var(--primary-color); color: var(--text-primary-color, #fff);
-          font-size: 14px; font-weight: 500; cursor: pointer;
+          background: ${PP_GREEN}; color: #080B11;
+          font-family: ${PP_FONT}; font-size: 14px; font-weight: 600; cursor: pointer;
         }
         .send-btn:disabled { opacity: 0.4; cursor: default; }
       </style>`;
