@@ -66,15 +66,16 @@ async def test_build_dashboard_config_builds_view_once_entities_registered(hass:
     assert len(view["sections"]) == 3
 
     status_section = view["sections"][0]
-    kpi_cards = [c for c in status_section["cards"] if c["type"] == "custom:mushroom-template-card"]
-    assert [t["primary"] for t in kpi_cards] == [
-        "State of Charge",
-        "Deployed Power",
-        "Temperature",
-        "P1 Meter",
+    kpi_card = next(c for c in status_section["cards"] if c["type"] == "custom:planetpod-kpi-card")
+    assert [t["kind"] for t in kpi_card["tiles"]] == [
+        "value_subtitle",
+        "dual_signed",
+        "value",
+        "net_signed",
     ]
-    for tile in kpi_cards:
-        assert "{{" in tile["secondary"]
+    soc_tile = kpi_card["tiles"][0]
+    assert soc_tile["entity"].startswith("sensor.")
+    assert soc_tile["subtitle_entity"].startswith("sensor.")
 
     charts_section, details_section = view["sections"][1], view["sections"][2]
     soc_card = next(c for c in charts_section["cards"] if c["type"] == "custom:planetpod-soc-card")
@@ -86,11 +87,10 @@ async def test_build_dashboard_config_builds_view_once_entities_registered(hass:
     assert len(planning_card["entities"]) == 24
     assert all(e.startswith("number.") for e in planning_card["entities"])
 
-    entity_stacks = [c for c in details_section["cards"] if c["type"] == "vertical-stack"]
-    assert len(entity_stacks) == 4
-    button_stack = entity_stacks[-1]
-    assert len(button_stack["cards"]) == 3
-    assert all(c["type"] == "custom:mushroom-entity-card" for c in button_stack["cards"])
+    entities_cards = [c for c in details_section["cards"] if c["type"] == "entities"]
+    assert len(entities_cards) == 3
+    button_grid = next(c for c in details_section["cards"] if c["type"] == "grid")
+    assert len(button_grid["cards"]) == 3
 
 
 async def test_build_dashboard_config_skips_unknown_pod(hass: HomeAssistant):
