@@ -66,15 +66,16 @@ async def test_build_dashboard_config_builds_view_once_entities_registered(hass:
     assert len(view["sections"]) == 3
 
     status_section = view["sections"][0]
-    kpi_cards = [c for c in status_section["cards"] if c["type"] == "custom:mushroom-template-card"]
-    assert [t["primary"] for t in kpi_cards] == [
-        "State of Charge",
-        "Deployed Power",
-        "Temperature",
-        "P1 Meter",
+    kpi_card = next(c for c in status_section["cards"] if c["type"] == "custom:planetpod-kpi-card")
+    assert [t["kind"] for t in kpi_card["tiles"]] == [
+        "value_subtitle",
+        "dual_signed",
+        "value",
+        "net_signed",
     ]
-    for tile in kpi_cards:
-        assert "{{" in tile["secondary"]
+    soc_tile = kpi_card["tiles"][0]
+    assert soc_tile["entity"].startswith("sensor.")
+    assert soc_tile["subtitle_entity"].startswith("sensor.")
 
     charts_section, details_section = view["sections"][1], view["sections"][2]
     soc_card = next(c for c in charts_section["cards"] if c["type"] == "custom:planetpod-soc-card")
