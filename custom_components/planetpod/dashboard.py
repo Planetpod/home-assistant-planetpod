@@ -70,8 +70,19 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
     battery_temp = _eid(registry, entry_id, serial, "sensor", "avg_battery_temp_c")
     p1_delivered = _eid(registry, entry_id, serial, "sensor", "balance_g1_power_delivered_kw")
     p1_returned = _eid(registry, entry_id, serial, "sensor", "balance_g1_power_returned_kw")
+    online = _eid(registry, entry_id, serial, "sensor", "online")
+    relay_status = _eid(registry, entry_id, serial, "sensor", "relay_status")
     if not all(
-        (charge_status, deployed_power, requested_power, battery_temp, p1_delivered, p1_returned)
+        (
+            charge_status,
+            deployed_power,
+            requested_power,
+            battery_temp,
+            p1_delivered,
+            p1_returned,
+            online,
+            relay_status,
+        )
     ):
         return None
 
@@ -105,14 +116,22 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
             "negative_entity": p1_returned,
             "unit": "kW",
         },
+        {
+            "kind": "text",
+            "label": "Online",
+            "entity": online,
+            "colors": {"online": "#44F4B3", "offline": "#f8333c"},
+        },
+        {
+            "kind": "text",
+            "label": "Relay Status",
+            "entity": relay_status,
+            "colors": {"230_ON": "#44F4B3", "230_OFF": "#f8333c"},
+        },
     ]
 
     ENTITY_LABELS = {
         "mode": "Mode",
-        "online": "Online",
-        "max_charge_power_kw": "Max Charge Power",
-        "max_discharge_power_kw": "Max Discharge Power",
-        "relay_status": "Relay Status",
         "soc_upper_limit_pct": "SoC Upper Limit",
         "soc_lower_limit_pct": "SoC Lower Limit",
         "reboot": "Reboot",
@@ -127,10 +146,7 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
             if (e := _eid(registry, entry_id, serial, domain, key))
         ]
 
-    entity_col_1 = _eids(("mode", "select"), ("online", "sensor"))
-    entity_col_2 = _eids(
-        ("max_charge_power_kw", "sensor"), ("max_discharge_power_kw", "sensor"), ("relay_status", "sensor")
-    )
+    entity_col_1 = _eids(("mode", "select"))
     entity_col_3 = _eids(("soc_upper_limit_pct", "number"), ("soc_lower_limit_pct", "number"))
     buttons = _eids(
         ("reboot", "button"), ("toggle_calibration", "button"), ("turn_off_bms", "button")
@@ -140,13 +156,14 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
         e
         for e in (
             *(e for e, _label in entity_col_1),
-            *(e for e, _label in entity_col_2),
             *(e for e, _label in entity_col_3),
             *(e for e, _label in buttons),
             *planning_entities,
             soc,
             deployed_power,
             requested_power,
+            online,
+            relay_status,
         )
         if e
     ]
@@ -207,15 +224,7 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
                             {"type": "custom:mushroom-entity-card", "entity": e, "name": label}
                             for e, label in entity_col_1
                         ],
-                        "grid_options": {"columns": 8, "rows": "auto"},
-                    },
-                    {
-                        "type": "vertical-stack",
-                        "cards": [
-                            {"type": "custom:mushroom-entity-card", "entity": e, "name": label}
-                            for e, label in entity_col_2
-                        ],
-                        "grid_options": {"columns": 8, "rows": "auto"},
+                        "grid_options": {"columns": 10, "rows": "auto"},
                     },
                     {
                         "type": "vertical-stack",
@@ -223,7 +232,7 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
                             {"type": "custom:mushroom-entity-card", "entity": e, "name": label}
                             for e, label in entity_col_3
                         ],
-                        "grid_options": {"columns": 8, "rows": "auto"},
+                        "grid_options": {"columns": 10, "rows": "auto"},
                     },
                     {
                         "type": "vertical-stack",
@@ -241,7 +250,7 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
                     {
                         "type": "logbook",
                         "entities": activity_entities,
-                        "grid_options": {"columns": 16, "rows": "auto"},
+                        "grid_options": {"columns": 20, "rows": "auto"},
                     },
                 ],
             },

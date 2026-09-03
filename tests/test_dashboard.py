@@ -72,10 +72,17 @@ async def test_build_dashboard_config_builds_view_once_entities_registered(hass:
         "dual_signed",
         "value",
         "net_signed",
+        "text",
+        "text",
     ]
     soc_tile = kpi_card["tiles"][0]
     assert soc_tile["entity"].startswith("sensor.")
     assert soc_tile["subtitle_entity"].startswith("sensor.")
+    online_tile, relay_tile = kpi_card["tiles"][4], kpi_card["tiles"][5]
+    assert online_tile["label"] == "Online"
+    assert online_tile["entity"].startswith("sensor.")
+    assert relay_tile["label"] == "Relay Status"
+    assert relay_tile["entity"].startswith("sensor.")
 
     charts_section, details_section = view["sections"][1], view["sections"][2]
     soc_card = next(c for c in charts_section["cards"] if c["type"] == "custom:planetpod-soc-card")
@@ -88,7 +95,7 @@ async def test_build_dashboard_config_builds_view_once_entities_registered(hass:
     assert all(e.startswith("number.") for e in planning_card["entities"])
 
     entity_stacks = [c for c in details_section["cards"] if c["type"] == "vertical-stack"]
-    assert len(entity_stacks) == 4
+    assert len(entity_stacks) == 3
     for stack in entity_stacks:
         assert all(c["type"] == "custom:mushroom-entity-card" for c in stack["cards"])
         assert all(c.get("name") for c in stack["cards"])
