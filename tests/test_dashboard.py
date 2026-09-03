@@ -92,6 +92,10 @@ async def test_build_dashboard_config_builds_view_once_entities_registered(hass:
     button_stack = entity_stacks[-1]
     assert len(button_stack["cards"]) == 3
     assert all(c["type"] == "custom:mushroom-entity-card" for c in button_stack["cards"])
+    assert {c["name"] for c in button_stack["cards"]} == {"Reboot", "Calibration", "Turn Off BMS"}
+
+    logbook_card = next(c for c in details_section["cards"] if c["type"] == "logbook")
+    assert sum(e.startswith("number.") and "planning" in e for e in logbook_card["entities"]) == 24
 
 
 async def test_build_dashboard_config_skips_unknown_pod(hass: HomeAssistant):
