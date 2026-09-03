@@ -307,6 +307,11 @@ class PlanetpodKpiCard extends PlanetpodBaseCard {
       valueHtml = fmtSigned(net, tile.unit);
       const direction = net > 0.01 ? "Importing" : net < -0.01 ? "Exporting" : "Balanced";
       subtitleHtml = `<span class="kpi-subtitle secondary">${direction}</span>`;
+    } else if (tile.kind === "text") {
+      const raw = this._state(tile.entity)?.state;
+      const label = (tile.labels && tile.labels[raw]) || raw || "—";
+      const color = (tile.colors && tile.colors[raw]) || "var(--primary-text-color)";
+      valueHtml = `<span style="color:${color}">${label}</span>`;
     } else {
       valueHtml = fmtPlain(this._val(tile.entity), tile.unit);
     }
