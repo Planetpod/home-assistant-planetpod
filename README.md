@@ -100,6 +100,46 @@ All four modes are sent to the pod using the same underlying wire representation
 | **Turn Off BMS** (button) | One-shot BMS shutdown. |
 | *(conditionally shown)* **Unlock SCU / Debug On / BMS Update** | Additional one-shot actions, surfaced only when applicable. |
 
+### Integrating with EMHASS (or any external optimizer)
+
+**Planning** mode exists specifically as a generic hand-off point for an external optimizer — its 24 `Planning Hour 00`–`23` number entities are just a plain hourly kW schedule that anything can write to, [EMHASS](https://github.com/davidusb-geek/emhass) included.
+
+EMHASS computes a day-ahead (or rolling) optimal charge/discharge schedule from PV/load forecasts and grid tariffs, and publishes it as a sensor (commonly with a `forecasts` attribute — a list of `{timestamp, value}` pairs, typically at 30-minute resolution). To feed that into Planetpod, add an automation that:
+
+1. Triggers whenever EMHASS finishes an optimization (it fires an event) or on EMHASS's own re-run schedule.
+2. Sets `select.planetpod_..._mode` to `planning`.
+3. Iterates EMHASS's forecast list, buckets each entry by hour-of-day, and calls `number.set_value` on the matching `number.planetpod_..._planning_hour_HH` entity — writing only hours that haven't passed yet.
+
+```yaml
+automation:
+  - alias: "EMHASS -> Planetpod planning schedule"
+    trigger:
+      - platform: state
+        entity_id: sensor.emhass_p_batt_forecast
+    action:
+      - service: select.select_option
+        target: { entity_id: select.planetpod_XXXX_mode }
+        data: { option: "planning" }
+      - repeat:
+          for_each: "{{ state_attr('sensor.emhass_p_batt_forecast', 'forecasts') }}"
+          sequence:
+            - variables:
+                hour: "{{ as_datetime(repeat.item.timestamp).hour }}"
+            - condition: template
+              value_template: "{{ hour >= now().hour }}"
+            - service: number.set_value
+              target:
+                entity_id: "number.planetpod_XXXX_planning_hour_{{ '%02d'|format(hour) }}"
+              data:
+                value: "{{ repeat.item.value }}"
+```
+
+A few things worth knowing before wiring this up:
+
+- **Resolution mismatch:** Planning mode is hourly; EMHASS is commonly half-hourly. The automation above picks the first 30-minute value per hour — you lose EMHASS's sub-hourly granularity against Planetpod's hourly grid.
+- **Keep battery specs in sync:** EMHASS's own config needs Planetpod's real capacity, round-trip efficiency, and max charge/discharge power to produce a physically realistic schedule. Planning mode clamps each hour to ±the pod's max charge power as a safety net, but it can't catch an EMHASS schedule that's SoC-infeasible (e.g. discharging past `SoC Lower Limit`) — keep EMHASS's SoC bounds matching `SoC Upper/Lower Limit` too.
+- **Not EMHASS-specific:** any planner that can output (or be translated into) a 24-value hourly kW array works the same way — a plain price-reactive automation, a custom AppDaemon/pyscript app, etc. Planners that instead express charge/discharge as time *windows* rather than an hourly array (e.g. Predbat) need an extra translation step to fit Planning mode's hourly grid.
+
 </details>
 
 ---
