@@ -115,8 +115,13 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
         ("max_charge_power_kw", "sensor"), ("max_discharge_power_kw", "sensor"), ("relay_status", "sensor")
     )
     entity_col_3 = _eids(("soc_upper_limit_pct", "number"), ("soc_lower_limit_pct", "number"))
+    button_labels = {
+        "reboot": "Reboot",
+        "toggle_calibration": "Calibration",
+        "turn_off_bms": "Turn Off BMS",
+    }
     buttons = [
-        e
+        (e, button_labels[key])
         for key in ("reboot", "toggle_calibration", "turn_off_bms")
         if (e := _eid(registry, entry_id, serial, "button", key))
     ]
@@ -127,7 +132,8 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
             *entity_col_1,
             *entity_col_2,
             *entity_col_3,
-            *buttons,
+            *(e for e, _label in buttons),
+            *planning_entities,
             soc,
             deployed_power,
             requested_power,
@@ -215,9 +221,10 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
                             {
                                 "type": "custom:mushroom-entity-card",
                                 "entity": e,
+                                "name": label,
                                 "icon_color": "#f8333c",
                             }
-                            for e in buttons
+                            for e, label in buttons
                         ],
                         "grid_options": {"columns": 8, "rows": "auto"},
                     },
