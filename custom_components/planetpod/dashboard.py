@@ -107,31 +107,41 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
         },
     ]
 
-    def _eids(*keys_domains: tuple[str, str]) -> list[str]:
-        return [e for key, domain in keys_domains if (e := _eid(registry, entry_id, serial, domain, key))]
+    ENTITY_LABELS = {
+        "mode": "Mode",
+        "online": "Online",
+        "max_charge_power_kw": "Max Charge Power",
+        "max_discharge_power_kw": "Max Discharge Power",
+        "relay_status": "Relay Status",
+        "soc_upper_limit_pct": "SoC Upper Limit",
+        "soc_lower_limit_pct": "SoC Lower Limit",
+        "reboot": "Reboot",
+        "toggle_calibration": "Calibration",
+        "turn_off_bms": "Turn Off BMS",
+    }
+
+    def _eids(*keys_domains: tuple[str, str]) -> list[tuple[str, str]]:
+        return [
+            (e, ENTITY_LABELS[key])
+            for key, domain in keys_domains
+            if (e := _eid(registry, entry_id, serial, domain, key))
+        ]
 
     entity_col_1 = _eids(("mode", "select"), ("online", "sensor"))
     entity_col_2 = _eids(
         ("max_charge_power_kw", "sensor"), ("max_discharge_power_kw", "sensor"), ("relay_status", "sensor")
     )
     entity_col_3 = _eids(("soc_upper_limit_pct", "number"), ("soc_lower_limit_pct", "number"))
-    button_labels = {
-        "reboot": "Reboot",
-        "toggle_calibration": "Calibration",
-        "turn_off_bms": "Turn Off BMS",
-    }
-    buttons = [
-        (e, button_labels[key])
-        for key in ("reboot", "toggle_calibration", "turn_off_bms")
-        if (e := _eid(registry, entry_id, serial, "button", key))
-    ]
+    buttons = _eids(
+        ("reboot", "button"), ("toggle_calibration", "button"), ("turn_off_bms", "button")
+    )
 
     activity_entities = [
         e
         for e in (
-            *entity_col_1,
-            *entity_col_2,
-            *entity_col_3,
+            *(e for e, _label in entity_col_1),
+            *(e for e, _label in entity_col_2),
+            *(e for e, _label in entity_col_3),
             *(e for e, _label in buttons),
             *planning_entities,
             soc,
@@ -194,24 +204,24 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
                     {
                         "type": "vertical-stack",
                         "cards": [
-                            {"type": "custom:mushroom-entity-card", "entity": e}
-                            for e in entity_col_1
+                            {"type": "custom:mushroom-entity-card", "entity": e, "name": label}
+                            for e, label in entity_col_1
                         ],
                         "grid_options": {"columns": 8, "rows": "auto"},
                     },
                     {
                         "type": "vertical-stack",
                         "cards": [
-                            {"type": "custom:mushroom-entity-card", "entity": e}
-                            for e in entity_col_2
+                            {"type": "custom:mushroom-entity-card", "entity": e, "name": label}
+                            for e, label in entity_col_2
                         ],
                         "grid_options": {"columns": 8, "rows": "auto"},
                     },
                     {
                         "type": "vertical-stack",
                         "cards": [
-                            {"type": "custom:mushroom-entity-card", "entity": e}
-                            for e in entity_col_3
+                            {"type": "custom:mushroom-entity-card", "entity": e, "name": label}
+                            for e, label in entity_col_3
                         ],
                         "grid_options": {"columns": 8, "rows": "auto"},
                     },
