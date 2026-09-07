@@ -98,7 +98,8 @@ All four modes are sent to the pod using the same underlying wire representation
 | **Reboot** (button) | One-shot pod reboot. |
 | **Toggle Calibration** (button) | Triggers a calibration cycle (full charge + balance). |
 | **Turn Off BMS** (button) | One-shot BMS shutdown. |
-| *(conditionally shown)* **Unlock SCU / Debug On / BMS Update** | Additional one-shot actions, surfaced only when applicable. |
+
+> Unlock SCU, BMS Update, Debug, and Unlock BMS are part of the real wire protocol but deliberately **not** exposed as HA buttons — they're considered too sensitive/rare for a one-tap local action and are meant to be triggered through Planetpod support or the app instead.
 
 ### Integrating with EMHASS (or any external optimizer)
 
