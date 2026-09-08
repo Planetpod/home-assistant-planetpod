@@ -96,10 +96,28 @@ async def test_build_dashboard_config_builds_view_once_entities_registered(hass:
 
     entity_stacks = [c for c in details_section["cards"] if c["type"] == "vertical-stack"]
     assert len(entity_stacks) == 3
-    for stack in entity_stacks:
-        assert all(c["type"] == "custom:mushroom-entity-card" for c in stack["cards"])
-        assert all(c.get("name") for c in stack["cards"])
-    button_stack = entity_stacks[-1]
+    mode_stack, soc_limit_stack, button_stack = entity_stacks
+
+    mode_card = mode_stack["cards"][0]
+    assert mode_card["type"] == "custom:mushroom-entity-card"
+    assert mode_card["name"] == "Mode"
+    assert mode_card["entity"].startswith("select.")
+
+    speed_conditional = mode_stack["cards"][1]
+    assert speed_conditional["type"] == "conditional"
+    assert speed_conditional["conditions"] == [
+        {"entity": mode_card["entity"], "state": "speed"}
+    ]
+    speed_card_types = [c["type"] for c in speed_conditional["card"]["cards"]]
+    assert speed_card_types == [
+        "custom:mushroom-number-card",
+        "custom:mushroom-number-card",
+        "custom:mushroom-entity-card",
+    ]
+
+    assert all(c["type"] == "custom:mushroom-entity-card" for c in soc_limit_stack["cards"])
+    assert all(c.get("name") for c in soc_limit_stack["cards"])
+
     assert len(button_stack["cards"]) == 3
     assert all(c["type"] == "custom:mushroom-entity-card" for c in button_stack["cards"])
     assert {c["name"] for c in button_stack["cards"]} == {"Reboot", "Calibration", "Turn Off BMS"}
