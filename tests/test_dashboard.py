@@ -96,7 +96,7 @@ async def test_build_dashboard_config_builds_view_once_entities_registered(hass:
 
     entity_stacks = [c for c in details_section["cards"] if c["type"] == "vertical-stack"]
     assert len(entity_stacks) == 3
-    mode_stack, soc_limit_stack, button_stack = entity_stacks
+    soc_limit_stack, button_stack, mode_stack = entity_stacks
 
     mode_card = mode_stack["cards"][0]
     assert mode_card["type"] == "custom:mushroom-entity-card"

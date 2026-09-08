@@ -259,11 +259,6 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
                 "cards": [
                     {
                         "type": "vertical-stack",
-                        "cards": mode_column_cards,
-                        "grid_options": {"columns": 10, "rows": "auto"},
-                    },
-                    {
-                        "type": "vertical-stack",
                         "cards": [
                             {"type": "custom:mushroom-entity-card", "entity": e, "name": label}
                             for e, label in entity_col_3
@@ -282,6 +277,11 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
                             for e, label in buttons
                         ],
                         "grid_options": {"columns": 8, "rows": "auto"},
+                    },
+                    {
+                        "type": "vertical-stack",
+                        "cards": mode_column_cards,
+                        "grid_options": {"columns": 10, "rows": "auto"},
                     },
                     {
                         "type": "logbook",
