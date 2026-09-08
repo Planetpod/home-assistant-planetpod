@@ -72,6 +72,10 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
     p1_returned = _eid(registry, entry_id, serial, "sensor", "balance_g1_power_returned_kw")
     online = _eid(registry, entry_id, serial, "sensor", "online")
     relay_status = _eid(registry, entry_id, serial, "sensor", "relay_status")
+    mode_entity = _eid(registry, entry_id, serial, "select", "mode")
+    speed_setpoint = _eid(registry, entry_id, serial, "number", "speed_setpoint_kw")
+    speed_duration = _eid(registry, entry_id, serial, "number", "speed_setpoint_duration_min")
+    send_speed_button = _eid(registry, entry_id, serial, "button", "send_speed_command")
     if not all(
         (
             charge_status,
@@ -131,7 +135,6 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
     ]
 
     ENTITY_LABELS = {
-        "mode": "Mode",
         "soc_upper_limit_pct": "SoC Upper Limit",
         "soc_lower_limit_pct": "SoC Lower Limit",
         "reboot": "Reboot",
@@ -146,16 +149,49 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
             if (e := _eid(registry, entry_id, serial, domain, key))
         ]
 
-    entity_col_1 = _eids(("mode", "select"))
     entity_col_3 = _eids(("soc_upper_limit_pct", "number"), ("soc_lower_limit_pct", "number"))
     buttons = _eids(
         ("reboot", "button"), ("toggle_calibration", "button"), ("turn_off_bms", "button")
     )
 
+    mode_column_cards: list[dict[str, Any]] = []
+    if mode_entity:
+        mode_column_cards.append(
+            {"type": "custom:mushroom-entity-card", "entity": mode_entity, "name": "Mode"}
+        )
+        if speed_setpoint and speed_duration and send_speed_button:
+            mode_column_cards.append(
+                {
+                    "type": "conditional",
+                    "conditions": [{"entity": mode_entity, "state": "speed"}],
+                    "card": {
+                        "type": "vertical-stack",
+                        "cards": [
+                            {
+                                "type": "custom:mushroom-number-card",
+                                "entity": speed_setpoint,
+                                "name": "Speed Setpoint",
+                            },
+                            {
+                                "type": "custom:mushroom-number-card",
+                                "entity": speed_duration,
+                                "name": "Duration (min)",
+                            },
+                            {
+                                "type": "custom:mushroom-entity-card",
+                                "entity": send_speed_button,
+                                "name": "Send Speed Command",
+                                "icon_color": "#f8333c",
+                            },
+                        ],
+                    },
+                }
+            )
+
     activity_entities = [
         e
         for e in (
-            *(e for e, _label in entity_col_1),
+            mode_entity,
             *(e for e, _label in entity_col_3),
             *(e for e, _label in buttons),
             *planning_entities,
@@ -164,6 +200,9 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
             requested_power,
             online,
             relay_status,
+            speed_setpoint,
+            speed_duration,
+            send_speed_button,
         )
         if e
     ]
@@ -220,10 +259,7 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
                 "cards": [
                     {
                         "type": "vertical-stack",
-                        "cards": [
-                            {"type": "custom:mushroom-entity-card", "entity": e, "name": label}
-                            for e, label in entity_col_1
-                        ],
+                        "cards": mode_column_cards,
                         "grid_options": {"columns": 10, "rows": "auto"},
                     },
                     {
