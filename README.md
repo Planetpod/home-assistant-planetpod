@@ -77,6 +77,27 @@ A **"Planetpod"** dashboard is created automatically (one view per pod, named af
 | **Charts** | SoC over the day, hourly Energy (grid import/export + battery charge/discharge), and the draggable **Planning** schedule |
 | **Details** | Mode + SoC limits, one-shot action buttons (Reboot / Calibration / Turn Off BMS), and an Activity log |
 
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ ┌──────┐ ┌──────────┐ ┌──────────┐ ┌────────┐ ┌────────┐ ┌─────────┐ │
+│ │ SoC  │ │ Deployed │ │  Temp    │ │   P1   │ │ Online │ │  Relay  │ │  KPI band
+│ │  %   │ │  Power   │ │   °C     │ │ Meter  │ │        │ │ Status  │ │
+│ └──────┘ └──────────┘ └──────────┘ └────────┘ └────────┘ └─────────┘ │
+├──────────────────────────────────────────────────────────────────────┤
+│ ┌────────────────┐  ┌────────────────┐  ┌────────────────┐          │
+│ │   SoC (%)      │  │  Energy Usage  │  │    Planning    │          │  Charts
+│ │  (line chart)  │  │  (hourly bars) │  │ (drag-to-edit) │          │
+│ └────────────────┘  └────────────────┘  └────────────────┘          │
+├──────────────────────────────────────────────────────────────────────┤
+│ ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌────────────────────────┐ │
+│ │  SoC      │ │  Reboot   │ │  Mode     │ │       Activity         │ │  Details
+│ │  Upper/   │ │Calibration│ │(+ Speed   │ │      (log feed)        │ │
+│ │  Lower    │ │Turn Off   │ │ controls  │ │                        │ │
+│ │  Limit    │ │  BMS      │ │if "Speed")│ │                        │ │
+│ └───────────┘ └───────────┘ └───────────┘ └────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
 Layout changes ship as ordinary integration updates — the dashboard regenerates automatically the next time Home Assistant (re)starts.
 
 ### Modes
