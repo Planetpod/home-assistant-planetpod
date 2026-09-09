@@ -104,12 +104,12 @@ Layout changes ship as ordinary integration updates — the dashboard regenerate
 
 The **Mode** select entity controls how the pod's power setpoint is derived. It's mirrored identically to every pod on the install — there's no per-pod split.
 
-| Mode | Behavior |
-|---|---|
-| **Balance** | Zero-export target: aims to keep grid import/export near zero using your chosen G1 source. |
-| **Standby** | Holds a persistent 0 kW setpoint — the pod neither charges nor discharges. |
-| **Speed** | Holds a manually staged kW setpoint (**Speed Setpoint** + duration), applied via the **Send Speed Command** button. |
-| **Planning** | Holds whichever value is set for the *current hour* in the 24-entry hourly schedule (`Planning Hour 00`–`23`, ±kW, staged via the dashboard's drag-to-edit Planning chart and applied via **Send Planning**) — the same source an external optimizer (e.g. EMHASS) could drive. |
+| Mode | Behavior | How to activate it |
+|---|---|---|
+| **Balance** | Zero-export target: aims to keep grid import/export near zero using your chosen G1 source. | Select **Balance** in the Mode dropdown — takes effect on its own, no further input needed. |
+| **Standby** | Holds a persistent 0 kW setpoint — the pod neither charges nor discharges. | Select **Standby** — takes effect on its own, no further input needed. |
+| **Speed** | Holds a manually staged kW setpoint for a fixed duration. | Select **Speed** first — this reveals the **Speed Setpoint** (kW) and **Duration** (min) sliders plus a **Send Speed Command** button in the dashboard's Mode card. Set both values, then press the button — nothing applies until you do. |
+| **Planning** | Holds whichever value is set for the *current hour* in the 24-entry hourly schedule (`Planning Hour 00`–`23`, ±kW) — the same source an external optimizer (e.g. EMHASS) could drive. | Select **Planning**, drag each hour's point on the dashboard's Planning chart to the desired kW, then press **Send Planning** — nothing applies until you do. |
 
 All four modes are sent to the pod using the same underlying wire representation firmware expects (`Modus: "solarSmart"`, a `subMode`/`setpoint_kW` pair) — this is an implementation detail, not something you need to configure.
 
