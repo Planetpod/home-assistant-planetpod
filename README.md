@@ -127,7 +127,7 @@ Use the Action buttons to send commands to Planetpod through Home Assistant — 
 | **Calibration** | Calibrates the state of charge (SoC) reading and balances the battery cells. Will charge to ~100%. | To start calibration manually, or when requested by Support. | Calibration mode indicates it is running. A completion message in the error log confirms it has finished. |
 | **Turn-off battery supply** (`Turn Off BMS`) | Switches off the battery system. | When requested by Support, or to shut down completely for transport or service — see "Turn-off battery supply — usage notes" below. | After the complete shutdown procedure below, only one steady red light remains visible through the bottom window. |
 
-> Unlock SCU, BMS Update, Debug, and Unlock BMS are part of the real wire protocol but deliberately **not** exposed as HA buttons — they're considered too sensitive/rare for a one-tap local action and are meant to be triggered through Planetpod support or the app instead.
+> Other Planetpod service actions are part of the real wire protocol but deliberately **not** exposed as HA buttons — they're considered too sensitive/rare for a one-tap local action and are meant to be triggered through Planetpod support or the app instead.
 
 <details>
 <summary>Reboot — usage notes</summary>
