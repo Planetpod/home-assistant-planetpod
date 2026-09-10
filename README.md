@@ -115,14 +115,65 @@ All four modes are sent to the pod using the same underlying wire representation
 
 ### Actions
 
-| Action | Effect |
-|---|---|
-| **SoC Upper/Lower Limit** (number entities) | Caps how full/empty the pod will charge/discharge to. Sent to the pod on its next GET. |
-| **Reboot** (button) | One-shot pod reboot. |
-| **Toggle Calibration** (button) | Triggers a calibration cycle (full charge + balance). |
-| **Turn Off BMS** (button) | One-shot BMS shutdown. |
+**SoC Upper/Lower Limit** (number entities) cap how full/empty the pod will charge/discharge to. Sent to the pod on its next GET.
+
+#### Action buttons
+
+Use the Action buttons to send commands to Planetpod through Home Assistant — these remote commands are mainly for troubleshooting and maintenance.
+
+| Action | What it does | When to use | How to check |
+|---|---|---|---|
+| **Reboot** | Restarts Planetpod's onboard computer. | When Planetpod behaves unexpectedly, or Support requests a restart. | "Had a reboot" appears in the last error log after approximately one minute. |
+| **Calibration** | Calibrates the state of charge (SoC) reading and balances the battery cells. Will charge to ~100%. | To start calibration manually, or when requested by Support. | Calibration mode indicates it is running. A completion message in the error log confirms it has finished. |
+| **Turn-off battery supply** (`Turn Off BMS`) | Switches off the battery system. | When requested by Support, or to shut down completely for transport or service — see "Turn-off battery supply — usage notes" below. | After the complete shutdown procedure below, only one steady red light remains visible through the bottom window. |
 
 > Unlock SCU, BMS Update, Debug, and Unlock BMS are part of the real wire protocol but deliberately **not** exposed as HA buttons — they're considered too sensitive/rare for a one-tap local action and are meant to be triggered through Planetpod support or the app instead.
+
+<details>
+<summary>Reboot — usage notes</summary>
+
+A reboot clears the computer's cache and restarts its processes. Charging and discharging pause for approximately one minute while Planetpod starts up and reconnects to Wi-Fi and Home Assistant.
+
+Wait at least one minute between reboots. If Planetpod has lost its connection to Home Assistant and/or Wi-Fi, the command may not reach it — in that case, perform a manual reset as described in the user manual.
+
+</details>
+
+<details>
+<summary>Calibration — what to expect</summary>
+
+Planetpod automatically schedules calibration:
+
+- Every two weeks, starting the next time it receives a charge command. The action button lets you start this cycle manually.
+- Or immediately, if an off-nominal low charge level is detected (undervoltage).
+
+During calibration, Planetpod charges to approximately 100%, starting at 1.6 kW and gradually reducing the charging speed as the battery fills. The cycle ends with a trickle charge to balance the cells.
+
+Planetpod ignores other charge and discharge commands during calibration. Once finished, it leaves Calibration mode, records an informational completion message in the error log, and resumes accepting commands from Home Assistant. To cancel calibration, reboot Planetpod.
+
+</details>
+
+<details>
+<summary>Turn-off battery supply — usage notes</summary>
+
+Turning off the battery system does not fully shut down Planetpod while AC power remains on — the battery system switches off, but the onboard computer continues running on AC power. Rebooting Planetpod turns the Battery supply (BMS) back on.
+
+For a complete shutdown, follow the sequence below.
+
+**Complete shutdown**
+
+1. Switch off the AC input using Planetpod's isolation switch (werkschakelaar) or its dedicated circuit breaker in the distribution board (meterkastgroep).
+2. Wait 30 seconds.
+3. Send the **Turn-off battery supply** command through Home Assistant. Planetpod powers down once it receives the command.
+4. Check the viewing window at the bottom. Shutdown is complete when only one steady red light remains visible — this is the BMS indicator for the battery system.
+5. If other lights remain visible, the system is still active. Confirm that the AC input is off, then send the **Turn-off battery supply** command again. Once Planetpod has shut down, communication is no longer available.
+
+**Starting Planetpod again**
+
+1. Make sure the AC input has been off for at least one minute.
+2. Switch the AC input back on using the isolation switch or dedicated circuit breaker.
+3. Allow approximately one minute for Planetpod to start up and reconnect. Once connected, it resumes accepting charge and discharge commands from Home Assistant.
+
+</details>
 
 ### Integrating with EMHASS (or any external optimizer)
 
