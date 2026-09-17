@@ -428,8 +428,24 @@ class PlanetpodSensor(CoordinatorEntity[AnyPlanetpodCoordinator], SensorEntity):
 
     @property
     def available(self) -> bool:
-        """Return availability."""
-        return super().available and self._get_pod() is not None
+        """Return availability.
+
+        Once a pod goes offline, its last-known payload is still sitting in
+        the coordinator (nothing clears it), so without this every
+        live-data sensor (charge status, SoC, deployed power, ...) would
+        keep reporting stale numbers as if the pod were still responding.
+        The "Online" sensor itself and the diagnostic ones (raw POST/GET,
+        error log) are exempt -- they're exactly what you'd check to see
+        *that* and *when* a pod went offline, so they must stay available.
+        """
+        pod = self._get_pod()
+        if not super().available or pod is None:
+            return False
+        if self.entity_description.key == "online":
+            return True
+        if self.entity_description.entity_category == EntityCategory.DIAGNOSTIC:
+            return True
+        return bool(pod.get("status", {}).get("online", True))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
