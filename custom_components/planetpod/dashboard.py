@@ -304,8 +304,20 @@ def build_dashboard_config(
     return {"views": views}
 
 
-async def async_ensure_dashboard(hass: HomeAssistant, entry_id: str, serials: list[str]) -> None:
-    """Create-or-update the Planetpod dashboard so its layout stays in sync with the code."""
+async def async_ensure_dashboard(
+    hass: HomeAssistant, entry_id: str, serials: list[str]
+) -> set[str] | None:
+    """Create-or-update the Planetpod dashboard so its layout stays in sync with the code.
+
+    Returns the set of serials that actually got a view built and saved, or
+    None if nothing could be saved at all (registry not ready yet, or an
+    internal-API failure). A serial can legitimately be dropped from the
+    *requested* list if its entities aren't in the registry yet (see
+    _build_view) -- the caller must only treat the *returned* set as
+    "handled", so a pod whose entities were still registering when this ran
+    gets retried on its next coordinator update instead of being silently
+    left off the dashboard forever.
+    """
     try:
         from homeassistant.components.lovelace import dashboard as ll_dashboard
         from homeassistant.components.lovelace.const import (
@@ -320,7 +332,7 @@ async def async_ensure_dashboard(hass: HomeAssistant, entry_id: str, serials: li
         registry = er.async_get(hass)
         config = build_dashboard_config(registry, entry_id, serials)
         if config is None:
-            return
+            return None
 
         collection = ll_dashboard.DashboardsCollection(hass)
         await collection.async_load()
@@ -346,5 +358,7 @@ async def async_ensure_dashboard(hass: HomeAssistant, entry_id: str, serials: li
             )
 
         await ll_dashboard.LovelaceStorage(hass, item).async_save(config)
+        return {view["path"].removeprefix("pod-") for view in config["views"]}
     except Exception:  # noqa: BLE001 -- internal HA API, must never break integration setup
         _LOGGER.exception("PLANETPOD: failed to auto-provision the dashboard (non-fatal)")
+        return None

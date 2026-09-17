@@ -121,17 +121,34 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Keep the bundled dashboard's layout in sync with the code -- re-provisioned
     # whenever the set of known pods changes (new pod added, or entities for an
     # existing pod register for the first time after this reload).
+    #
+    # known_dashboard_serials must only ever be advanced to what
+    # async_ensure_dashboard actually confirmed it saved a view for -- NOT to
+    # every serial the coordinator currently knows about. A newly-discovered
+    # pod's entities are added by sensor.py/number.py/select.py/button.py's
+    # own listeners, which race against this one; if this task runs first,
+    # build_dashboard_config silently drops that pod's view (its entities
+    # aren't in the registry yet). Marking it "known" anyway would freeze
+    # the dashboard with that pod permanently missing -- the serial set
+    # never changes again on its own, so _maybe_update_dashboard would never
+    # retry it, even though the pod's entities show up moments later.
+    # (Confirmed in production: a second pod's 61 entities were all
+    # registered, but its dashboard view never appeared.)
     known_dashboard_serials: set[str] = set()
 
     def _maybe_update_dashboard() -> None:
         pods: list[dict] = coordinator.data.get("pods", []) if coordinator.data else []
         serials = {s for pod in pods if (s := pod.get("battery", {}).get("serial_number"))}
-        if serials and serials != known_dashboard_serials:
-            known_dashboard_serials.clear()
-            known_dashboard_serials.update(serials)
-            hass.async_create_task(
-                async_ensure_dashboard(hass, entry.entry_id, sorted(serials))
-            )
+        if not serials or serials == known_dashboard_serials:
+            return
+
+        async def _update() -> None:
+            saved_serials = await async_ensure_dashboard(hass, entry.entry_id, sorted(serials))
+            if saved_serials is not None:
+                known_dashboard_serials.clear()
+                known_dashboard_serials.update(saved_serials)
+
+        hass.async_create_task(_update())
 
     entry.async_on_unload(coordinator.async_add_listener(_maybe_update_dashboard))
     _maybe_update_dashboard()
