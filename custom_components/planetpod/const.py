@@ -64,6 +64,12 @@ CONF_PENDING_COMMANDS = "pending_commands"
 
 ONLINE_TIMEOUT_SECONDS = 60
 
+# How often the local coordinator re-checks online status with no new pod
+# traffic -- must be well under ONLINE_TIMEOUT_SECONDS so a pod that simply
+# stops POSTing is still caught promptly, since nothing else would ever
+# trigger that recheck (see PlanetpodLocalCoordinator._handle_online_recheck).
+ONLINE_RECHECK_INTERVAL_SECONDS = 15
+
 QUERY_PARAM_SERIAL = "serial"
 HTTP_VIEW_URL = "/planetpod"
 

@@ -12,13 +12,13 @@ import json
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from homeassistant.const import EntityCategory
+from homeassistant.const import EntityCategory, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
-from pytest_homeassistant_custom_component.common import MockConfigEntry
+from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
 
 from homeassistant import config_entries
 
@@ -28,6 +28,7 @@ from custom_components.planetpod.const import (
     CONNECTION_TYPE_LOCAL,
     DOMAIN,
     G1_SOURCE_POD,
+    ONLINE_TIMEOUT_SECONDS,
     PENDING_PODS_KEY,
 )
 
@@ -974,3 +975,69 @@ async def test_planning_mode_defaults_to_zero_for_unset_hour(hass: HomeAssistant
     assert coordinator.effective_planning_power_kw == 0.0
     response = coordinator.get_response_for("PP-001")
     assert response["solarSmart"] == {"subMode": "speed", "setpoint_kW": 0.0}
+
+
+async def test_online_recheck_flips_online_sensor_offline_with_no_new_traffic(
+    hass: HomeAssistant,
+):
+    """The periodic online recheck registered in
+    PlanetpodLocalCoordinator.__init__ (async_track_time_interval ->
+    _handle_online_recheck) must flip the Online sensor to "offline" once
+    ONLINE_TIMEOUT_SECONDS has elapsed since the pod's last POST -- even
+    with no further pod traffic. Nothing else would ever re-trigger that
+    recheck, since the coordinator is otherwise push-only, so without it
+    this would stay "online" forever once a pod actually goes quiet.
+
+    This fires the *actual* scheduled HA timer via async_fire_time_changed
+    (it locates and runs the real asyncio.TimerHandle async_track_time_interval
+    registered), rather than calling _handle_online_recheck directly, so it
+    also catches the timer never having been registered/unsubscribed, or
+    (as originally shipped) not being decorated @callback and silently
+    getting bounced to an executor thread instead of running on the event
+    loop. last_message_at is backdated using real wall-clock time (not
+    freezegun) so build_pod_status's own `datetime.now(timezone.utc)` --
+    which async_fire_time_changed's internal now-patching doesn't reach --
+    genuinely sees it as stale.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    assert hass.states.get("sensor.planetpod_pp_001_online").state == "online"
+
+    coordinator._last_message_at["PP-001"] = datetime.now(timezone.utc) - timedelta(
+        seconds=ONLINE_TIMEOUT_SECONDS + 30
+    )
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=ONLINE_TIMEOUT_SECONDS + 30))
+    await hass.async_block_till_done()
+
+    assert hass.states.get("sensor.planetpod_pp_001_online").state == "offline"
+
+
+async def test_data_sensors_go_unavailable_offline_but_diagnostics_stay(
+    hass: HomeAssistant,
+):
+    """Once a pod is offline, live-data sensors (e.g. Charge Status, SoC)
+    must go unavailable rather than keep reporting the last cached POST as
+    if it were current. The Online sensor and diagnostic sensors (raw
+    POST/GET, error log) must stay available -- they're exactly what you'd
+    check to see when/why a pod went offline.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    coordinator._last_message_at["PP-001"] = datetime.now(timezone.utc) - timedelta(
+        seconds=ONLINE_TIMEOUT_SECONDS + 30
+    )
+    coordinator._rebuild()
+    await hass.async_block_till_done()
+
+    assert hass.states.get("sensor.planetpod_pp_001_charge_status").state == STATE_UNAVAILABLE
+    assert hass.states.get("sensor.planetpod_pp_001_state_of_charge").state == STATE_UNAVAILABLE
+
+    assert hass.states.get("sensor.planetpod_pp_001_online").state == "offline"
+    assert hass.states.get("sensor.planetpod_pp_001_last_error").state != STATE_UNAVAILABLE
+    assert hass.states.get("sensor.planetpod_pp_001_last_post_received").state != STATE_UNAVAILABLE

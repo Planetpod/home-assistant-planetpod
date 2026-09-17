@@ -11,7 +11,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.util import dt as dt_util
 
@@ -37,6 +38,7 @@ from .const import (
     DOMAIN,
     G1_SOURCE_HA_SENSOR,
     MODE_BALANCE,
+    ONLINE_RECHECK_INTERVAL_SECONDS,
 )
 from .mode_logic import compute_get_response
 from .pod_status import build_pod_status
@@ -125,6 +127,29 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
             CONF_SENT_SPEED_SETPOINT_KW, DEFAULT_SPEED_SETPOINT_KW
         )
         self.async_set_updated_data({"pods": []})
+
+        # _rebuild() (which recomputes status.online against
+        # ONLINE_TIMEOUT_SECONDS) otherwise only runs reactively, from
+        # ingest_post/get_response_for/an option change -- exactly the kind
+        # of traffic that stops once a pod actually goes offline. Without
+        # this, online/available would freeze at whatever they were at the
+        # last real message instead of ever flipping once the pod goes
+        # quiet.
+        entry.async_on_unload(
+            async_track_time_interval(
+                hass,
+                self._handle_online_recheck,
+                timedelta(seconds=ONLINE_RECHECK_INTERVAL_SECONDS),
+            )
+        )
+
+    @callback
+    def _handle_online_recheck(self, _now: datetime) -> None:
+        # Without @callback, HA schedules this onto an executor thread
+        # instead of the event loop -- and _rebuild()'s
+        # async_set_updated_data() must run on the event loop.
+        if self._raw_payloads:
+            self._rebuild()
 
     def _persist_pending_commands(self) -> None:
         new_options = {
