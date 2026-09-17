@@ -9,6 +9,8 @@ POST, not the cloud loaded_config_entry fixture.
 """
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -23,6 +25,14 @@ MOCK_LOCAL_PAYLOAD = {
     "g1Data": {"powerDelivered": 0, "powerReturned": 1.2},
     "bmsData": {"socPct": 62, "soh": 98, "cycleCount": 143, "avgTempC": 27.4},
     "podStatus": {"podChargingStatus": "idle", "podMode": "balance"},
+}
+SERIAL_2 = "PP-002"
+MOCK_LOCAL_PAYLOAD_2 = {
+    "timestamp": "2026-07-14T12:00:05.000Z",
+    "systemInfo": {"podSerialNumber": SERIAL_2, "firmwareVersion": "1.1.8"},
+    "g1Data": {"powerDelivered": 0, "powerReturned": 1.2},
+    "bmsData": {"socPct": 40, "soh": 95, "cycleCount": 88, "avgTempC": 25.1},
+    "podStatus": {"podChargingStatus": "charge", "podMode": "balance"},
 }
 
 
@@ -135,3 +145,69 @@ async def test_build_dashboard_config_skips_unknown_pod(hass: HomeAssistant):
 
     assert len(config["views"]) == 1
     assert config["views"][0]["path"] == f"pod-{SERIAL}"
+
+
+async def test_dashboard_retries_a_pod_not_yet_saved_instead_of_dropping_it_forever(
+    hass: HomeAssistant,
+):
+    """Regression test for a real production bug: two pods on one grid, but
+    the sidebar dashboard only ever showed one pod's tab -- confirmed live,
+    where both pods' entities (61 each) were fully registered yet the second
+    pod's view never appeared.
+
+    Root cause: __init__.py's _maybe_update_dashboard marked a newly-seen
+    serial as "known" as soon as the coordinator reported it, regardless of
+    whether async_ensure_dashboard actually managed to save a view for it.
+    Since entity registration (sensor.py/number.py/etc.'s own listeners) and
+    the dashboard rebuild race against each other, a pod whose entities
+    hadn't finished registering yet got silently dropped from the built
+    config (see build_dashboard_config) -- and because "known" already
+    included it, the guard that would normally trigger a rebuild on the
+    next coordinator update (`serials != known_dashboard_serials`) never
+    fired again. That pod's tab was gone permanently, not just delayed.
+
+    This simulates exactly that: async_ensure_dashboard returns a *partial*
+    result (as it now can, see its own docstring) the first time PP-002
+    shows up, standing in for its entities not being registered yet.
+    """
+    calls: list[list[str]] = []
+
+    async def fake_ensure_dashboard(hass, entry_id, serials):
+        sorted_serials = sorted(serials)
+        calls.append(sorted_serials)
+        if SERIAL_2 in serials and len(calls) == 2:
+            # Simulate PP-002's entities not being in the registry yet on
+            # its first appearance -- only PP-001's view got saved.
+            return {SERIAL}
+        return set(serials)
+
+    with patch(
+        "custom_components.planetpod.async_ensure_dashboard",
+        side_effect=fake_ensure_dashboard,
+    ):
+        entry = MockConfigEntry(
+            domain=DOMAIN,
+            title="Planetpod",
+            data={CONF_CONNECTION_TYPE: CONNECTION_TYPE_LOCAL},
+            options={},
+            unique_id="planetpod_local_dashboard_retry_test",
+        )
+        entry.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        coordinator = hass.data[DOMAIN][entry.entry_id]
+        coordinator.ingest_post(SERIAL, MOCK_LOCAL_PAYLOAD)
+        await hass.async_block_till_done()
+        coordinator.ingest_post(SERIAL_2, MOCK_LOCAL_PAYLOAD_2)
+        await hass.async_block_till_done()
+
+        assert calls == [[SERIAL], [SERIAL, SERIAL_2]]
+
+        # PP-002 wasn't confirmed saved -- a later coordinator update (any
+        # pod's next periodic POST) must retry it, not silently accept the
+        # partial result as "done".
+        coordinator.ingest_post(SERIAL, MOCK_LOCAL_PAYLOAD)
+        await hass.async_block_till_done()
+
+        assert calls == [[SERIAL], [SERIAL, SERIAL_2], [SERIAL, SERIAL_2]]

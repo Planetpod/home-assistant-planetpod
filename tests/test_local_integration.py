@@ -25,9 +25,11 @@ from homeassistant import config_entries
 from custom_components.planetpod.const import (
     CONF_CONNECTION_TYPE,
     CONF_G1_SOURCE,
+    CONF_MODE,
     CONNECTION_TYPE_LOCAL,
     DOMAIN,
     G1_SOURCE_POD,
+    HTTP_VIEW_URL,
     ONLINE_TIMEOUT_SECONDS,
     PENDING_PODS_KEY,
 )
@@ -38,6 +40,17 @@ MOCK_LOCAL_PAYLOAD = {
     "g1Data": {"powerDelivered": 0, "powerReturned": 1.2},
     "bmsData": {"socPct": 62, "soh": 98, "cycleCount": 143, "avgTempC": 27.4},
     "podStatus": {"podChargingStatus": "idle", "podMode": "balance"},
+}
+
+# A second, independent pod on the same grid/install -- distinct serial and
+# distinct telemetry, used to exercise the "one grid, multiple pods" case
+# that (unlike the cloud integration) had zero test coverage before.
+MOCK_LOCAL_PAYLOAD_2 = {
+    "timestamp": "2026-07-14T12:00:05.000Z",
+    "systemInfo": {"podSerialNumber": "PP-002", "firmwareVersion": "1.1.8"},
+    "g1Data": {"powerDelivered": 0, "powerReturned": 1.2},
+    "bmsData": {"socPct": 40, "soh": 95, "cycleCount": 88, "avgTempC": 25.1},
+    "podStatus": {"podChargingStatus": "charge", "podMode": "balance"},
 }
 
 
@@ -1041,3 +1054,123 @@ async def test_data_sensors_go_unavailable_offline_but_diagnostics_stay(
     assert hass.states.get("sensor.planetpod_pp_001_online").state == "offline"
     assert hass.states.get("sensor.planetpod_pp_001_last_error").state != STATE_UNAVAILABLE
     assert hass.states.get("sensor.planetpod_pp_001_last_post_received").state != STATE_UNAVAILABLE
+
+
+# --- Multi-pod grid coverage --------------------------------------------
+#
+# One local-mode config entry is one grid; a grid can hold more than one
+# physical pod (unlike a second *grid*, which local mode structurally
+# cannot represent -- see config_flow.py's hardcoded "planetpod_local"
+# unique_id). Every test above this point used a single pod ("PP-001");
+# these guard the "one grid, N pods" path, which had no coverage at all
+# before -- entity creation, per-pod telemetry, grid-wide shared settings,
+# and the real HTTP GET/POST routing in api_local.py.
+
+
+async def test_two_pods_in_one_grid_get_independent_entities_and_telemetry(
+    hass: HomeAssistant,
+):
+    """Two distinct pod serials POSTing to the same grid/config entry must
+    each get their own entities, reporting their own telemetry -- not share
+    or overwrite each other's state.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    coordinator.ingest_post("PP-002", MOCK_LOCAL_PAYLOAD_2)
+    await hass.async_block_till_done()
+
+    assert coordinator.known_serials() == {"PP-001", "PP-002"}
+
+    assert hass.states.get("sensor.planetpod_pp_001_charge_status").state == "idle"
+    assert hass.states.get("sensor.planetpod_pp_001_state_of_charge").state == "62"
+
+    assert hass.states.get("sensor.planetpod_pp_002_charge_status").state == "charge"
+    assert hass.states.get("sensor.planetpod_pp_002_state_of_charge").state == "40"
+
+
+async def test_grid_wide_settings_apply_to_every_pod_in_the_grid(hass: HomeAssistant):
+    """Mode/SoC limits are grid-wide (one config entry = one shared
+    entry.options), so changing Mode via ANY pod's Mode select must be
+    reflected for every other pod in the same grid, and the next GET for
+    each pod must carry the same setpoint -- not a per-pod split (matches
+    modus_controller.ts's confirmed grid-wide mirroring, see mode_logic.py).
+    """
+    entry = await _setup_local_entry(hass, options={"mode": "speed"})
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    coordinator.ingest_post("PP-002", MOCK_LOCAL_PAYLOAD_2)
+    await hass.async_block_till_done()
+
+    coordinator.set_speed_setpoint(1.8)
+
+    assert hass.states.get("select.planetpod_pp_001_mode").state == "speed"
+    assert hass.states.get("select.planetpod_pp_002_mode").state == "speed"
+
+    response_1 = coordinator.get_response_for("PP-001")
+    response_2 = coordinator.get_response_for("PP-002")
+    assert response_1["solarSmart"] == {"subMode": "speed", "setpoint_kW": 1.8}
+    assert response_2["solarSmart"] == {"subMode": "speed", "setpoint_kW": 1.8}
+
+    # Changing Mode from PP-002's own select entity must also update PP-001.
+    new_options = {**entry.options, CONF_MODE: "standby"}
+    hass.config_entries.async_update_entry(entry, options=new_options)
+    coordinator.async_options_updated()
+    await hass.async_block_till_done()
+
+    assert hass.states.get("select.planetpod_pp_001_mode").state == "standby"
+
+
+async def test_http_view_routes_post_and_get_independently_per_serial(
+    hass: HomeAssistant, hass_client
+):
+    """The real /planetpod HTTP endpoint (not just the coordinator directly)
+    must route each pod's POST/GET by its own ?serial=, so two pods on one
+    grid never see or overwrite each other's telemetry/commands.
+    """
+    entry = await _setup_local_entry(hass)
+    client = await hass_client()
+
+    resp = await client.post(HTTP_VIEW_URL, json=MOCK_LOCAL_PAYLOAD)
+    assert resp.status == 200
+    resp = await client.post(HTTP_VIEW_URL, json=MOCK_LOCAL_PAYLOAD_2)
+    assert resp.status == 200
+    await hass.async_block_till_done()
+
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    assert coordinator.known_serials() == {"PP-001", "PP-002"}
+
+    resp = await client.get(f"{HTTP_VIEW_URL}?serial=PP-001")
+    assert resp.status == 200
+    resp = await client.get(f"{HTTP_VIEW_URL}?serial=PP-002")
+    assert resp.status == 200
+
+    resp = await client.get(f"{HTTP_VIEW_URL}?serial=UNKNOWN-SERIAL")
+    assert resp.status == 404
+
+
+async def test_http_view_get_without_serial_requires_disambiguation_with_two_pods(
+    hass: HomeAssistant, hass_client
+):
+    """With only one pod known, GET with no ?serial= may assume it -- but
+    with two pods on the grid, guessing would silently send one pod's
+    commands/setpoint to the other, so it must require ?serial= instead.
+    """
+    await _setup_local_entry(hass)
+    client = await hass_client()
+
+    resp = await client.post(HTTP_VIEW_URL, json=MOCK_LOCAL_PAYLOAD)
+    assert resp.status == 200
+    await hass.async_block_till_done()
+
+    # Only one pod known so far -- GET with no ?serial= is fine.
+    resp = await client.get(HTTP_VIEW_URL)
+    assert resp.status == 200
+
+    resp = await client.post(HTTP_VIEW_URL, json=MOCK_LOCAL_PAYLOAD_2)
+    assert resp.status == 200
+    await hass.async_block_till_done()
+
+    # Two pods known now -- HA can no longer guess which one this GET is for.
+    resp = await client.get(HTTP_VIEW_URL)
+    assert resp.status == 400
