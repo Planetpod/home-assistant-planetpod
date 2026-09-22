@@ -147,11 +147,11 @@ class PlanetpodCommandButton(CoordinatorEntity[PlanetpodLocalCoordinator], Butto
     @property
     def available(self) -> bool:
         if self.entity_description.command == SEND_SPEED_COMMAND:
-            return super().available and self.coordinator.mode == MODE_SPEED
+            return super().available and self.coordinator.mode(self._serial) == MODE_SPEED
         return super().available
 
     async def async_press(self) -> None:
         if self.entity_description.command == SEND_SPEED_COMMAND:
-            self.coordinator.send_speed_command()
+            self.coordinator.send_speed_command(self._serial)
             return
         self.coordinator.trigger_command(self._serial, self.entity_description.command)

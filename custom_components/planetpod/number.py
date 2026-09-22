@@ -2,10 +2,10 @@
 
 Cloud entries get SoC limits as read-only sensors, sourced from the app;
 local entries have no cloud/app to configure them, so they're writable
-entities here instead. These values are mirrored across every pod on the
-install (see modus_controller.ts's grid-wide behavior), but are attached to
-each pod's own device so everything for that pod appears in one place --
-writing from any pod's slider updates the same shared config entry option.
+entities here instead. SoC limits, the Speed Setpoint/Duration, and the
+Planning schedule are all independent per pod (see
+coordinator_local.py's _get_per_pod_option) -- each pod's own device has its
+own values, and writing one pod's slider/box never affects another pod's.
 """
 from __future__ import annotations
 
@@ -34,9 +34,6 @@ from .const import (
     CONF_SPEED_SETPOINT_DURATION_MIN,
     CONF_SPEED_SETPOINT_KW,
     CONNECTION_TYPE_LOCAL,
-    DEFAULT_PLANNING_POWER_KW,
-    DEFAULT_SPEED_SETPOINT_DURATION_MIN,
-    DEFAULT_SPEED_SETPOINT_KW,
     DOMAIN,
     MANUFACTURER,
     MAX_CHARGE_POWER_KW,
@@ -55,7 +52,11 @@ class PlanetpodNumberEntityDescription(NumberEntityDescription):
     """Describes a Planetpod local-mode number entity."""
 
     option_key: str = ""
-    value_fn: Callable[[PlanetpodLocalCoordinator], float] = lambda _: 0.0
+    # Set only for the 24 Planning-hour descriptions, which need to know
+    # WHICH hour they are on top of the (shared) "planning_hour_XX" key
+    # naming pattern.
+    hour: int | None = None
+    value_fn: Callable[[PlanetpodLocalCoordinator, str], float] = lambda _coordinator, _serial: 0.0
 
 
 NUMBER_DESCRIPTIONS: tuple[PlanetpodNumberEntityDescription, ...] = (
@@ -68,7 +69,7 @@ NUMBER_DESCRIPTIONS: tuple[PlanetpodNumberEntityDescription, ...] = (
         native_max_value=MAX_SOC_UPPER_LIMIT_PCT,
         native_step=1,
         mode=NumberMode.SLIDER,
-        value_fn=lambda coordinator: coordinator.soc_upper_limit_pct,
+        value_fn=lambda coordinator, serial: coordinator.soc_upper_limit_pct(serial),
     ),
     PlanetpodNumberEntityDescription(
         key="soc_lower_limit_pct",
@@ -79,7 +80,7 @@ NUMBER_DESCRIPTIONS: tuple[PlanetpodNumberEntityDescription, ...] = (
         native_max_value=MAX_SOC_UPPER_LIMIT_PCT,
         native_step=1,
         mode=NumberMode.SLIDER,
-        value_fn=lambda coordinator: coordinator.soc_lower_limit_pct,
+        value_fn=lambda coordinator, serial: coordinator.soc_lower_limit_pct(serial),
     ),
     PlanetpodNumberEntityDescription(
         key="speed_setpoint_kw",
@@ -90,9 +91,7 @@ NUMBER_DESCRIPTIONS: tuple[PlanetpodNumberEntityDescription, ...] = (
         native_max_value=MAX_CHARGE_POWER_KW,
         native_step=0.1,
         mode=NumberMode.BOX,
-        value_fn=lambda coordinator: coordinator.entry.options.get(
-            CONF_SPEED_SETPOINT_KW, DEFAULT_SPEED_SETPOINT_KW
-        ),
+        value_fn=lambda coordinator, serial: coordinator.staged_speed_setpoint_kw(serial),
     ),
     PlanetpodNumberEntityDescription(
         key="speed_setpoint_duration_min",
@@ -103,7 +102,7 @@ NUMBER_DESCRIPTIONS: tuple[PlanetpodNumberEntityDescription, ...] = (
         native_max_value=MAX_SPEED_SETPOINT_DURATION_MIN,
         native_step=1,
         mode=NumberMode.BOX,
-        value_fn=lambda coordinator: coordinator.speed_setpoint_duration_min,
+        value_fn=lambda coordinator, serial: coordinator.speed_setpoint_duration_min(serial),
     ),
     # 24 hourly planning setpoints, driven by the Planning dashboard card
     # (drag a point -> writes this hour's entity). Plain options-backed
@@ -114,13 +113,14 @@ NUMBER_DESCRIPTIONS: tuple[PlanetpodNumberEntityDescription, ...] = (
             key=f"planning_hour_{hour:02d}",
             name=f"Planning {hour:02d}:00",
             option_key=f"planning_hour_{hour:02d}",
+            hour=hour,
             native_unit_of_measurement=UnitOfPower.KILO_WATT,
             native_min_value=-MAX_CHARGE_POWER_KW,
             native_max_value=MAX_CHARGE_POWER_KW,
             native_step=0.1,
             mode=NumberMode.BOX,
-            value_fn=lambda coordinator, hour=hour: coordinator.entry.options.get(
-                f"planning_hour_{hour:02d}", DEFAULT_PLANNING_POWER_KW
+            value_fn=lambda coordinator, serial, hour=hour: coordinator.planning_hour_kw(
+                serial, hour
             ),
         )
         for hour in PLANNING_HOURS
@@ -159,7 +159,7 @@ async def async_setup_entry(
 
 
 class PlanetpodSocLimitNumber(CoordinatorEntity[PlanetpodLocalCoordinator], NumberEntity):
-    """A writable SoC upper/lower limit, shared across the install but shown per-pod."""
+    """A writable per-pod SoC limit / Speed Setpoint / Planning value."""
 
     entity_description: PlanetpodNumberEntityDescription
     _attr_has_entity_name = True
@@ -174,7 +174,6 @@ class PlanetpodSocLimitNumber(CoordinatorEntity[PlanetpodLocalCoordinator], Numb
     ) -> None:
         super().__init__(coordinator)
         self.entity_description = description
-        self._entry = entry
         self._serial = serial_number
         self._attr_unique_id = f"{entry.entry_id}_{serial_number}_{description.key}"
 
@@ -188,7 +187,7 @@ class PlanetpodSocLimitNumber(CoordinatorEntity[PlanetpodLocalCoordinator], Numb
 
     @property
     def native_value(self) -> float:
-        return self.entity_description.value_fn(self.coordinator)
+        return self.entity_description.value_fn(self.coordinator, self._serial)
 
     @property
     def available(self) -> bool:
@@ -196,30 +195,36 @@ class PlanetpodSocLimitNumber(CoordinatorEntity[PlanetpodLocalCoordinator], Numb
             CONF_SPEED_SETPOINT_KW,
             CONF_SPEED_SETPOINT_DURATION_MIN,
         ):
-            return super().available and self.coordinator.mode == MODE_SPEED
+            return super().available and self.coordinator.mode(self._serial) == MODE_SPEED
         return super().available
 
     async def async_set_native_value(self, value: float) -> None:
         # Speed Setpoint/Duration are staged only -- editing them here does not
         # send anything to the pod. Press "Send Speed Command" to apply.
         if self.entity_description.option_key == CONF_SPEED_SETPOINT_KW:
-            self.coordinator.stage_speed_setpoint(value)
+            self.coordinator.stage_speed_setpoint(self._serial, value)
             return
         if self.entity_description.option_key == CONF_SPEED_SETPOINT_DURATION_MIN:
-            self.coordinator.set_speed_setpoint_duration(value)
+            self.coordinator.set_speed_setpoint_duration(self._serial, value)
+            return
+        if self.entity_description.hour is not None:
+            self.coordinator.set_planning_hour_kw(self._serial, self.entity_description.hour, value)
             return
         if self.entity_description.option_key == CONF_SOC_LOWER_LIMIT:
-            if value > self.coordinator.soc_upper_limit_pct:
+            upper = self.coordinator.soc_upper_limit_pct(self._serial)
+            if value > upper:
                 raise HomeAssistantError(
                     f"SoC Lower Limit ({value}%) cannot be higher than "
-                    f"SoC Upper Limit ({self.coordinator.soc_upper_limit_pct}%)"
+                    f"SoC Upper Limit ({upper}%)"
                 )
-        elif self.entity_description.option_key == CONF_SOC_UPPER_LIMIT:
-            if value < self.coordinator.soc_lower_limit_pct:
+            self.coordinator.set_soc_lower_limit(self._serial, value)
+            return
+        if self.entity_description.option_key == CONF_SOC_UPPER_LIMIT:
+            lower = self.coordinator.soc_lower_limit_pct(self._serial)
+            if value < lower:
                 raise HomeAssistantError(
                     f"SoC Upper Limit ({value}%) cannot be lower than "
-                    f"SoC Lower Limit ({self.coordinator.soc_lower_limit_pct}%)"
+                    f"SoC Lower Limit ({lower}%)"
                 )
-        new_options = {**self._entry.options, self.entity_description.option_key: value}
-        self.hass.config_entries.async_update_entry(self._entry, options=new_options)
-        self.coordinator.async_options_updated()
+            self.coordinator.set_soc_upper_limit(self._serial, value)
+            return

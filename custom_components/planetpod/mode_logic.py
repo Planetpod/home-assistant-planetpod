@@ -51,10 +51,10 @@ def compute_get_response(
 ) -> dict[str, Any]:
     """Compute the GET /planetpod response body for one pod.
 
-    `mode` and any config (SOC boundaries, etc.) are mirrored identically to
-    every pod on an install per the confirmed modus_controller.ts pattern --
-    callers are expected to invoke this once per install and send the same
-    result to every pod's GET, not compute a per-pod split.
+    Mode/SoC limits/Speed Setpoint/Planning are all independent per pod (see
+    coordinator_local.py's _get_per_pod_option) -- callers invoke this once
+    per pod, with that pod's own values, not a single shared result mirrored
+    to every pod on the install.
     """
     net_export_kw = None
     if g1_power_delivered_kw is not None or g1_power_returned_kw is not None:

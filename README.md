@@ -102,7 +102,7 @@ Layout changes ship as ordinary integration updates — the dashboard regenerate
 
 ### Modes
 
-The **Mode** select entity controls how the pod's power setpoint is derived. It's mirrored identically to every pod on the install — there's no per-pod split.
+The **Mode** select entity controls how the pod's power setpoint is derived. Mode, SoC limits, the Speed Setpoint/Duration/Send, and the Planning schedule are all independent per pod — setting them on one pod's card never affects another pod on the same grid.
 
 | Mode | Behavior | How to activate it |
 |---|---|---|
