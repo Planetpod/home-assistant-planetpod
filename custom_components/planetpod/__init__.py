@@ -33,9 +33,9 @@ PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.NUMBER, Platform.SELECT, 
 # fetched even after an update ships new/changed card classes, and Lovelace
 # then reports "Configuration error" for any custom element that no longer
 # matches what's actually on disk.
-def _card_url() -> str:
+def _read_manifest_version() -> str:
     manifest = json.loads((Path(__file__).parent / "manifest.json").read_text())
-    return f"/{DOMAIN}_static/planetpod-cards.js?v={manifest['version']}"
+    return manifest["version"]
 
 
 async def _async_register_frontend_resources(hass: HomeAssistant) -> None:
@@ -48,11 +48,15 @@ async def _async_register_frontend_resources(hass: HomeAssistant) -> None:
     await hass.http.async_register_static_paths(
         [StaticPathConfig(f"/{DOMAIN}_static", str(www_path), cache_headers=False)]
     )
+    # manifest.json's synchronous read must not run on the event loop (HA
+    # flags this as a blocking-call bug) -- offload it to the executor.
+    version = await hass.async_add_executor_job(_read_manifest_version)
+    card_url = f"/{DOMAIN}_static/planetpod-cards.js?v={version}"
     # frontend is a core component always loaded before custom integrations
     # in a real HA install, but isn't guaranteed present in a minimal test
     # environment -- skip registering the resource rather than failing setup.
     try:
-        add_extra_js_url(hass, _card_url())
+        add_extra_js_url(hass, card_url)
     except KeyError:
         _LOGGER.debug("PLANETPOD: frontend component not loaded, skipping dashboard resource registration")
 
