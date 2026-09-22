@@ -110,22 +110,24 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
             for serial, commands in entry.options.get(CONF_PENDING_COMMANDS, {}).items()
         }
 
-        # Restored from entry.options (see send_speed_command) so an active
-        # Speed Setpoint command survives a reload instead of silently
-        # reverting to idle with time still remaining.
+        # Restored from entry.options (see send_speed_command), per pod, so
+        # an active Speed Setpoint command survives a reload instead of
+        # silently reverting to idle with time still remaining.
         raw_expires_at = entry.options.get(CONF_SPEED_SETPOINT_EXPIRES_AT)
-        self._speed_setpoint_expires_at: datetime | None = (
-            datetime.fromisoformat(raw_expires_at) if raw_expires_at else None
+        self._speed_setpoint_expires_at: dict[str, datetime] = (
+            {serial: datetime.fromisoformat(v) for serial, v in raw_expires_at.items()}
+            if isinstance(raw_expires_at, dict)
+            else {}
         )
-        # Snapshot of CONF_SPEED_SETPOINT_KW taken at the moment
-        # send_speed_command() last ran -- effective_speed_setpoint_kw must
-        # read this, NOT the live option, otherwise staging a new value
-        # while a previous command is still active leaks through immediately
-        # without send_speed_command() ever being called again. Also
-        # restored from entry.options for the same reload-survival reason.
-        self._sent_speed_setpoint_kw: float = entry.options.get(
-            CONF_SENT_SPEED_SETPOINT_KW, DEFAULT_SPEED_SETPOINT_KW
-        )
+        # Snapshot of each pod's staged CONF_SPEED_SETPOINT_KW taken at the
+        # moment send_speed_command() last ran for it --
+        # effective_speed_setpoint_kw must read this, NOT the live staged
+        # option, otherwise staging a new value while a previous command is
+        # still active leaks through immediately without
+        # send_speed_command() ever being called again. Also restored from
+        # entry.options for the same reload-survival reason.
+        raw_sent = entry.options.get(CONF_SENT_SPEED_SETPOINT_KW)
+        self._sent_speed_setpoint_kw: dict[str, float] = dict(raw_sent) if isinstance(raw_sent, dict) else {}
         self.async_set_updated_data({"pods": []})
 
         # _rebuild() (which recomputes status.online against
@@ -171,24 +173,84 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
         self._pending_commands.setdefault(serial, set()).add(command)
         self._persist_pending_commands()
 
-    @property
-    def mode(self) -> str:
-        return self.entry.options.get(CONF_MODE, DEFAULT_MODE)
+    def _get_per_pod_option(self, key: str, serial: str, default: Any) -> Any:
+        """Read one pod's value out of a per-pod option dict.
 
-    @property
-    def soc_upper_limit_pct(self) -> float:
-        return self.entry.options.get(CONF_SOC_UPPER_LIMIT, DEFAULT_SOC_UPPER_LIMIT)
+        Mode/SoC limits/Planning/Speed Setpoint are all stored this way:
+        {key: {serial: value}} in entry.options, so each pod's HA entities
+        are genuinely independent instead of every pod's card silently
+        reading/writing the exact same install-wide value (the bug this
+        replaced -- confirmed live where sending a Speed command from one
+        pod's card overwrote another pod's still-active command).
 
-    @property
-    def soc_lower_limit_pct(self) -> float:
-        return self.entry.options.get(CONF_SOC_LOWER_LIMIT, DEFAULT_SOC_LOWER_LIMIT)
+        A pre-upgrade install stored this as one flat value shared by every
+        pod (no dict at all) -- fall back to THAT, not the hardcoded
+        default, so upgrading doesn't silently reset an already-configured
+        Mode/SoC limit/setpoint back to factory defaults on a live pod.
+        """
+        per_pod = self.entry.options.get(key)
+        if isinstance(per_pod, dict):
+            return per_pod.get(serial, default)
+        if per_pod is not None:
+            return per_pod
+        return default
+
+    def _set_per_pod_option(self, key: str, serial: str, value: Any) -> None:
+        existing = self.entry.options.get(key)
+        if isinstance(existing, dict):
+            per_pod = dict(existing)
+        elif existing is not None:
+            # Legacy flat value (see _get_per_pod_option) -- seed every
+            # OTHER currently-known pod with it before this pod's value
+            # diverges, so they don't silently jump to the hardcoded
+            # default the instant this option becomes a per-pod dict.
+            per_pod = {other: existing for other in self.known_serials()}
+        else:
+            per_pod = {}
+        per_pod[serial] = value
+        new_options = {**self.entry.options, key: per_pod}
+        self.hass.config_entries.async_update_entry(self.entry, options=new_options)
+
+    def async_options_updated(self) -> None:
+        """Recompute pod status after entry.options was mutated directly
+        (bypassing one of the setter methods above)."""
+        self._rebuild()
+
+    def mode(self, serial: str) -> str:
+        return self._get_per_pod_option(CONF_MODE, serial, DEFAULT_MODE)
+
+    def set_mode(self, serial: str, mode: str) -> None:
+        self._set_per_pod_option(CONF_MODE, serial, mode)
+        self._rebuild()
+
+    def soc_upper_limit_pct(self, serial: str) -> float:
+        return self._get_per_pod_option(CONF_SOC_UPPER_LIMIT, serial, DEFAULT_SOC_UPPER_LIMIT)
+
+    def set_soc_upper_limit(self, serial: str, value: float) -> None:
+        self._set_per_pod_option(CONF_SOC_UPPER_LIMIT, serial, value)
+        self._rebuild()
+
+    def soc_lower_limit_pct(self, serial: str) -> float:
+        return self._get_per_pod_option(CONF_SOC_LOWER_LIMIT, serial, DEFAULT_SOC_LOWER_LIMIT)
+
+    def set_soc_lower_limit(self, serial: str, value: float) -> None:
+        self._set_per_pod_option(CONF_SOC_LOWER_LIMIT, serial, value)
+        self._rebuild()
 
     @property
     def sound_mode(self) -> bool:
+        # Not yet exposed as an HA entity (no switch/select writes to it) --
+        # stays install-wide until it is.
         return self.entry.options.get(CONF_SOUND_MODE, DEFAULT_SOUND_MODE)
 
-    @property
-    def effective_planning_power_kw(self) -> float:
+    def planning_hour_kw(self, serial: str, hour: int) -> float:
+        return self._get_per_pod_option(f"planning_hour_{hour:02d}", serial, DEFAULT_PLANNING_POWER_KW)
+
+    def set_planning_hour_kw(self, serial: str, hour: int, value: float) -> None:
+        self._set_per_pod_option(f"planning_hour_{hour:02d}", serial, value)
+        self._rebuild()
+
+    def effective_planning_power_kw(self, serial: str) -> float:
         """The Planning schedule's setpoint for the current wall-clock hour.
 
         Uses HA's configured local timezone, not UTC -- the Planning
@@ -196,78 +258,73 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
         so the schedule must be read back against the same clock.
         """
         hour = dt_util.now().hour
-        return self.entry.options.get(f"planning_hour_{hour:02d}", DEFAULT_PLANNING_POWER_KW)
+        return self.planning_hour_kw(serial, hour)
 
-    def async_options_updated(self) -> None:
-        """Recompute pod status after an option (SoC limits, sound mode, ...) changes."""
-        self._rebuild()
-
-    @property
-    def speed_setpoint_duration_min(self) -> float:
-        return self.entry.options.get(
-            CONF_SPEED_SETPOINT_DURATION_MIN, DEFAULT_SPEED_SETPOINT_DURATION_MIN
+    def speed_setpoint_duration_min(self, serial: str) -> float:
+        return self._get_per_pod_option(
+            CONF_SPEED_SETPOINT_DURATION_MIN, serial, DEFAULT_SPEED_SETPOINT_DURATION_MIN
         )
 
-    def stage_speed_setpoint(self, value: float) -> None:
+    def set_speed_setpoint_duration(self, serial: str, value: float) -> None:
+        """Update how long a Speed Setpoint stays active once sent -- takes
+        effect the next time send_speed_command() is called, not retroactively."""
+        self._set_per_pod_option(CONF_SPEED_SETPOINT_DURATION_MIN, serial, value)
+        self._rebuild()
+
+    def staged_speed_setpoint_kw(self, serial: str) -> float:
+        return self._get_per_pod_option(CONF_SPEED_SETPOINT_KW, serial, DEFAULT_SPEED_SETPOINT_KW)
+
+    def stage_speed_setpoint(self, serial: str, value: float) -> None:
         """Stage a Speed Setpoint value without sending it -- takes effect
         only once send_speed_command() is called (the "Send Speed Command"
         button), so Setpoint and Duration can both be set before applying."""
-        new_options = {**self.entry.options, CONF_SPEED_SETPOINT_KW: value}
-        self.hass.config_entries.async_update_entry(self.entry, options=new_options)
+        self._set_per_pod_option(CONF_SPEED_SETPOINT_KW, serial, value)
         self._rebuild()
 
-    def set_speed_setpoint_duration(self, value: float) -> None:
-        """Update how long a Speed Setpoint stays active once sent -- takes
-        effect the next time send_speed_command() is called, not retroactively."""
-        new_options = {**self.entry.options, CONF_SPEED_SETPOINT_DURATION_MIN: value}
-        self.hass.config_entries.async_update_entry(self.entry, options=new_options)
-        self._rebuild()
-
-    def set_speed_setpoint(self, value: float) -> None:
+    def set_speed_setpoint(self, serial: str, value: float) -> None:
         """Stage a Speed Setpoint value and immediately send it -- convenience
         for programmatic callers (e.g. tests, or an EMHASS bridge automation
         that wants one atomic call) that don't need the stage/send split."""
-        self.stage_speed_setpoint(value)
-        self.send_speed_command()
+        self.stage_speed_setpoint(serial, value)
+        self.send_speed_command(serial)
 
-    def send_speed_command(self) -> None:
-        """Apply the currently staged Speed Setpoint, active for
-        speed_setpoint_duration_min from now.
+    def send_speed_command(self, serial: str) -> None:
+        """Apply the currently staged Speed Setpoint for this pod, active
+        for its speed_setpoint_duration_min from now.
 
-        Snapshots the staged value into _sent_speed_setpoint_kw so a later
-        stage_speed_setpoint() call (without a matching send) can never
-        change what's actually being applied -- and fully overwrites any
-        still-active previous command, no queueing. Both the snapshot and
+        Snapshots the staged value into _sent_speed_setpoint_kw[serial] so a
+        later stage_speed_setpoint() call (without a matching send) can
+        never change what's actually being applied -- and fully overwrites
+        any still-active previous command for THIS pod only, no queueing
+        and no effect on any other pod's own command. Both the snapshot and
         the expiry are persisted into entry.options so an active command
         survives a coordinator reload (HA restart, integration
         update/reinstall) instead of silently reverting to idle."""
-        self._sent_speed_setpoint_kw = self.entry.options.get(
-            CONF_SPEED_SETPOINT_KW, DEFAULT_SPEED_SETPOINT_KW
+        value = self.staged_speed_setpoint_kw(serial)
+        expires_at = datetime.now(timezone.utc) + timedelta(
+            minutes=self.speed_setpoint_duration_min(serial)
         )
-        self._speed_setpoint_expires_at = datetime.now(timezone.utc) + timedelta(
-            minutes=self.speed_setpoint_duration_min
-        )
-        new_options = {
-            **self.entry.options,
-            CONF_SENT_SPEED_SETPOINT_KW: self._sent_speed_setpoint_kw,
-            CONF_SPEED_SETPOINT_EXPIRES_AT: self._speed_setpoint_expires_at.isoformat(),
-        }
-        self.hass.config_entries.async_update_entry(self.entry, options=new_options)
+        self._sent_speed_setpoint_kw[serial] = value
+        self._speed_setpoint_expires_at[serial] = expires_at
+
+        self._set_per_pod_option(CONF_SENT_SPEED_SETPOINT_KW, serial, value)
+        self._set_per_pod_option(CONF_SPEED_SETPOINT_EXPIRES_AT, serial, expires_at.isoformat())
         self._rebuild()
 
-    @property
-    def effective_speed_setpoint_kw(self) -> float:
-        """The Speed Setpoint to actually apply, or 0.0 if its duration has elapsed."""
-        if not self.speed_setpoint_active:
+    def effective_speed_setpoint_kw(self, serial: str) -> float:
+        """The Speed Setpoint to actually apply for this pod, or 0.0 if its
+        duration has elapsed."""
+        if not self.speed_setpoint_active(serial):
             return DEFAULT_SPEED_SETPOINT_KW
-        return self._sent_speed_setpoint_kw
+        return self._sent_speed_setpoint_kw.get(serial, DEFAULT_SPEED_SETPOINT_KW)
 
-    @property
-    def speed_setpoint_active(self) -> bool:
-        """Whether the current Speed Setpoint is still within its configured duration."""
-        if self._speed_setpoint_expires_at is None:
+    def speed_setpoint_active(self, serial: str) -> bool:
+        """Whether this pod's current Speed Setpoint is still within its
+        configured duration."""
+        expires_at = self._speed_setpoint_expires_at.get(serial)
+        if expires_at is None:
             return False
-        return datetime.now(timezone.utc) < self._speed_setpoint_expires_at
+        return datetime.now(timezone.utc) < expires_at
 
     def ingest_post(self, serial: str, payload: dict[str, Any]) -> None:
         """Handle a POST /planetpod payload from one pod."""
@@ -308,8 +365,8 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
             status = build_pod_status(
                 serial,
                 self._with_last_known_bms_fields(serial, payload),
-                soc_upper_limit_pct=self.soc_upper_limit_pct,
-                soc_lower_limit_pct=self.soc_lower_limit_pct,
+                soc_upper_limit_pct=self.soc_upper_limit_pct(serial),
+                soc_lower_limit_pct=self.soc_lower_limit_pct(serial),
                 sound_mode=self.sound_mode,
                 last_message_at=self._last_message_at.get(serial),
                 last_requested_power_kw=self._last_requested_power_kw.get(serial),
@@ -329,10 +386,14 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
                 "source_label": self._g1_source_label(),
                 "power_delivered_kw": g1_delivered,
                 "power_returned_kw": g1_returned,
-                "error": "Can't balance: no P1 sensor" if (no_p1 and self.mode == MODE_BALANCE) else None,
+                "error": (
+                    "Can't balance: no P1 sensor"
+                    if (no_p1 and self.mode(serial) == MODE_BALANCE)
+                    else None
+                ),
             }
             status["speed_setpoint_status"] = (
-                "Active" if self.speed_setpoint_active else "Expired (reverted to idle)"
+                "Active" if self.speed_setpoint_active(serial) else "Expired (reverted to idle)"
             )
             pods.append(status)
         self.async_set_updated_data({"pods": pods})
@@ -363,11 +424,11 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
         g1_delivered, g1_returned = self._resolve_g1(serial)
 
         response = compute_get_response(
-            mode=self.mode,
+            mode=self.mode(serial),
             g1_power_delivered_kw=g1_delivered,
             g1_power_returned_kw=g1_returned,
-            speed_setpoint_kw=self.effective_speed_setpoint_kw,
-            planning_power_kw=self.effective_planning_power_kw,
+            speed_setpoint_kw=self.effective_speed_setpoint_kw(serial),
+            planning_power_kw=self.effective_planning_power_kw(serial),
         )
 
         set_point = response["solarSmart"]["setpoint_kW"]
@@ -380,12 +441,14 @@ class PlanetpodLocalCoordinator(DataUpdateCoordinator):
         # persisted to NVS and used by the local UDP mesh grouping logic.
         # Omitting these means the SoC Upper/Lower Limit entities silently
         # have no effect on the real pod at all.
-        response["Min_SOC"] = self.soc_lower_limit_pct
-        response["Max_SOC"] = self.soc_upper_limit_pct
-        # All pods on one HA install are treated as one grid group, matching
-        # the confirmed grid-wide mirroring pattern used elsewhere (mode/SOC
-        # limits); firmware's own un-configured default is also True.
-        response["sameGroup"] = True
+        response["Min_SOC"] = self.soc_lower_limit_pct(serial)
+        response["Max_SOC"] = self.soc_upper_limit_pct(serial)
+        # Mode/SoC/Speed/Planning are now genuinely independent per pod (see
+        # _get_per_pod_option), so pods must NOT be grouped for firmware's
+        # own local UDP mesh load-sharing anymore -- sameGroup=True would
+        # let firmware silently coordinate/rebalance power between pods
+        # behind HA's back, undermining the independence just implemented.
+        response["sameGroup"] = False
 
         response.update(_build_command_flags(pending))
 
