@@ -1,9 +1,8 @@
 """Tests for the auto-provisioned dashboard's config-building logic.
 
-Only the pure build_dashboard_config()/_build_view() path is tested here --
-async_ensure_dashboard() touches homeassistant.components.lovelace internals
-directly and is out of scope for unit tests (see dashboard.py's module
-docstring for why). Planning number entities only exist in local mode (see
+Mostly the pure build_dashboard_config()/_build_view() path; one test drives
+async_ensure_dashboard() against a real lovelace setup for the cached-config
+bug. Planning number entities only exist in local mode (see
 number.py), so these tests use a local config entry with an ingested pod
 POST, not the cloud loaded_config_entry fixture.
 """
@@ -84,11 +83,16 @@ async def test_build_dashboard_config_builds_view_once_entities_registered(hass:
         "net_signed",
         "text",
         "text",
+        "text",
     ]
     soc_tile = kpi_card["tiles"][0]
     assert soc_tile["entity"].startswith("sensor.")
     assert soc_tile["subtitle_entity"].startswith("sensor.")
-    online_tile, relay_tile = kpi_card["tiles"][4], kpi_card["tiles"][5]
+    pod_mode_tile = kpi_card["tiles"][4]
+    assert pod_mode_tile["label"] == "Pod Mode"
+    assert pod_mode_tile["entity"].startswith("sensor.")
+    assert pod_mode_tile["labels"]["calibration"] == "Calibration"
+    online_tile, relay_tile = kpi_card["tiles"][5], kpi_card["tiles"][6]
     assert online_tile["label"] == "Online"
     assert online_tile["entity"].startswith("sensor.")
     assert relay_tile["label"] == "Relay Status"
@@ -133,6 +137,8 @@ async def test_build_dashboard_config_builds_view_once_entities_registered(hass:
     assert {c["name"] for c in button_stack["cards"]} == {"Reboot", "Calibration", "Turn Off BMS"}
 
     logbook_card = next(c for c in details_section["cards"] if c["type"] == "logbook")
+    assert pod_mode_tile["entity"] in logbook_card["entities"]
+    assert any(e.endswith("_last_error") for e in logbook_card["entities"])
     assert sum(e.startswith("number.") and "planning" in e for e in logbook_card["entities"]) == 24
 
 
@@ -211,3 +217,41 @@ async def test_dashboard_retries_a_pod_not_yet_saved_instead_of_dropping_it_fore
         await hass.async_block_till_done()
 
         assert calls == [[SERIAL], [SERIAL, SERIAL_2], [SERIAL, SERIAL_2]]
+
+
+async def test_dashboard_update_reaches_the_live_cached_dashboard(hass: HomeAssistant):
+    """Once lovelace has loaded (and cached) the dashboard, a pod change must
+    replace what it serves -- not only the file on disk, which left the
+    sidebar showing a removed pod until an HA restart."""
+    from homeassistant.components.lovelace import dashboard as ll_dashboard
+    from homeassistant.setup import async_setup_component
+
+    from custom_components.planetpod.dashboard import (
+        DASHBOARD_URL_PATH,
+        async_ensure_dashboard,
+    )
+
+    assert await async_setup_component(hass, "lovelace", {})
+    ll_data = hass.data["lovelace"]
+    await ll_data.resources.async_get_info()
+    await ll_data.resources.async_create_item(
+        {"res_type": "module", "url": "/hacsfiles/lovelace-mushroom/mushroom.js"}
+    )
+    # As after a restart: lovelace has registered the dashboard and served
+    # (cached) a layout that still shows an old pod.
+    live = ll_dashboard.LovelaceStorage(
+        hass, {"id": "planetpod_home", "url_path": DASHBOARD_URL_PATH, "mode": "storage"}
+    )
+    await live.async_save({"views": [{"title": "Planetpod OLD", "path": "pod-OLD"}]})
+    ll_data.dashboards[DASHBOARD_URL_PATH] = live
+
+    entry = await _setup_local_entry_with_pod(hass)
+    with patch(
+        "homeassistant.components.lovelace.dashboard.DashboardsCollection.async_items",
+        return_value=[{"id": "planetpod_home", "url_path": DASHBOARD_URL_PATH}],
+    ):
+        saved = await async_ensure_dashboard(hass, entry.entry_id, [SERIAL])
+
+    assert saved == {SERIAL}
+    served = await live.async_load(False)
+    assert [view["path"] for view in served["views"]] == [f"pod-{SERIAL}"]

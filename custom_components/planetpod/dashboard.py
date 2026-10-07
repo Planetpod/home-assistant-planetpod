@@ -19,8 +19,8 @@ Caveat: creating the dashboard for the first time registers it in the
 dashboards collection but the *sidebar panel* only appears after an HA
 restart (the live lovelace panel registry only reacts to changes on its
 own collection instance, which this module can't reach). Content updates
-to an already-created dashboard take effect immediately, no restart
-needed.
+to an already-registered dashboard are saved through lovelace's own
+instance (see _live_dashboard), so they take effect without a restart.
 """
 from __future__ import annotations
 
@@ -29,14 +29,46 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
 
-from .const import DOMAIN, MAX_CHARGE_POWER_KW, PLANNING_HOURS
+from .const import DOMAIN, MAX_CHARGE_POWER_KW, PLANNING_HOURS, POD_MODE_LABELS
 
 _LOGGER = logging.getLogger(__name__)
 
 DASHBOARD_URL_PATH = "planetpod-home"
 DASHBOARD_TITLE = "Planetpod"
 DASHBOARD_ICON = "mdi:battery-charging-high"
+
+# The dashboard's control cards are Mushroom cards, which we don't bundle --
+# without it every one of them renders as "Configuration error".
+MUSHROOM_ISSUE_ID = "mushroom_missing"
+MUSHROOM_URL = "https://github.com/piitaya/lovelace-mushroom"
+
+
+def _live_dashboard(hass: HomeAssistant, url_path: str) -> Any:
+    """Lovelace's own config object for a dashboard, or None before it's registered.
+
+    A dashboard created by this module only gets registered after an HA restart.
+    """
+    data = hass.data.get("lovelace")
+    # LovelaceData dataclass on newer HA, a plain dict on older releases.
+    dashboards = getattr(data, "dashboards", None) or (
+        data.get("dashboards") if isinstance(data, dict) else None
+    )
+    return dashboards.get(url_path) if dashboards else None
+
+
+async def _async_mushroom_installed(hass: HomeAssistant) -> bool:
+    """Whether a Mushroom dashboard resource is registered (HACS or manual)."""
+    data = hass.data.get("lovelace")
+    # LovelaceData dataclass on newer HA, a plain dict on older releases.
+    resources = getattr(data, "resources", None) or (
+        data.get("resources") if isinstance(data, dict) else None
+    )
+    if resources is None:
+        return False
+    await resources.async_get_info()  # loads storage-mode resources if not yet loaded
+    return any("mushroom" in (item.get("url") or "").lower() for item in resources.async_items())
 
 
 def _eid(
@@ -72,6 +104,8 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
     p1_returned = _eid(registry, entry_id, serial, "sensor", "balance_g1_power_returned_kw")
     online = _eid(registry, entry_id, serial, "sensor", "online")
     relay_status = _eid(registry, entry_id, serial, "sensor", "relay_status")
+    pod_mode = _eid(registry, entry_id, serial, "sensor", "pod_mode")
+    last_error = _eid(registry, entry_id, serial, "sensor", "last_error")
     mode_entity = _eid(registry, entry_id, serial, "select", "mode")
     speed_setpoint = _eid(registry, entry_id, serial, "number", "speed_setpoint_kw")
     speed_duration = _eid(registry, entry_id, serial, "number", "speed_setpoint_duration_min")
@@ -84,6 +118,7 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
             battery_temp,
             p1_delivered,
             p1_returned,
+            pod_mode,
             online,
             relay_status,
         )
@@ -119,6 +154,22 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
             "positive_entity": p1_delivered,
             "negative_entity": p1_returned,
             "unit": "kW",
+        },
+        {
+            "kind": "text",
+            "label": "Pod Mode",
+            "entity": pod_mode,
+            "labels": POD_MODE_LABELS,
+            # Green = following commands; yellow = firmware has taken over.
+            "colors": {
+                "speed": "#44F4B3",
+                "balance": "#44F4B3",
+                "calibration": "#ffc53a",
+                "standby": "#ffc53a",
+                "shortStandby": "#ffc53a",
+                "cell_health_protect": "#ffc53a",
+                "locked": "#f8333c",
+            },
         },
         {
             "kind": "text",
@@ -198,6 +249,8 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
             soc,
             deployed_power,
             requested_power,
+            pod_mode,
+            last_error,
             online,
             relay_status,
             speed_setpoint,
@@ -334,6 +387,21 @@ async def async_ensure_dashboard(
         if config is None:
             return None
 
+        # Returning None makes the caller retry on the next coordinator
+        # update, so the dashboard appears once Mushroom gets installed.
+        if not await _async_mushroom_installed(hass):
+            ir.async_create_issue(
+                hass,
+                DOMAIN,
+                MUSHROOM_ISSUE_ID,
+                is_fixable=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key=MUSHROOM_ISSUE_ID,
+                learn_more_url=MUSHROOM_URL,
+            )
+            return None
+        ir.async_delete_issue(hass, DOMAIN, MUSHROOM_ISSUE_ID)
+
         collection = ll_dashboard.DashboardsCollection(hass)
         await collection.async_load()
         item = next(
@@ -357,7 +425,13 @@ async def async_ensure_dashboard(
                 DASHBOARD_URL_PATH,
             )
 
-        await ll_dashboard.LovelaceStorage(hass, item).async_save(config)
+        # Save through lovelace's own instance when it has one: it caches the
+        # config in memory, so writing via a second instance only updates the
+        # file and the sidebar keeps serving the old layout until a restart.
+        live = _live_dashboard(hass, DASHBOARD_URL_PATH)
+        if not isinstance(live, ll_dashboard.LovelaceStorage):
+            live = ll_dashboard.LovelaceStorage(hass, item)
+        await live.async_save(config)
         return {view["path"].removeprefix("pod-") for view in config["views"]}
     except Exception:  # noqa: BLE001 -- internal HA API, must never break integration setup
         _LOGGER.exception("PLANETPOD: failed to auto-provision the dashboard (non-fatal)")

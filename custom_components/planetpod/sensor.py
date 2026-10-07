@@ -26,7 +26,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import ATTR_ATTRIBUTION, DOMAIN, MANUFACTURER
+from .const import (
+    ATTR_ATTRIBUTION,
+    DOMAIN,
+    ERROR_SEVERITY_LABELS,
+    MANUFACTURER,
+    POD_MODE_LABELS,
+)
 from .coordinator import PlanetpodDataUpdateCoordinator
 from .coordinator_local import PlanetpodLocalCoordinator
 from .energy import async_setup_energy_entities
@@ -68,23 +74,22 @@ def _sort_errors_newest_first(logs: list[dict]) -> list[dict]:
     )
 
 
-def _format_error_entry(entry: dict) -> str:
-    """Format one error log entry as "[group] code (type): description".
+def _severity_label(entry: dict) -> str:
+    return ERROR_SEVERITY_LABELS.get(entry.get("severity"), "Unknown severity")
 
-    Firmware's ErrorInfoList isn't consistent -- most entries have a real
-    human-readable `description`, but some (e.g. E405/lost cloud connection)
-    ship with an empty one, carrying their only human text in `errorType`
-    instead, and `errorGroup` is often empty too. `[group]` is always shown
-    (as "[ ]" when empty) so every entry's shape stays visually consistent;
-    code/type/description are each included only when firmware populated
-    them.
+
+def _format_error_entry(entry: dict) -> str:
+    """Format one error log entry as "[severity] code (type): description".
+
+    Firmware's ErrorInfoList isn't consistent -- some entries (e.g. E405)
+    have an empty `description` and carry their only text in `errorType`,
+    so code/type/description are each included only when populated.
     """
-    group = entry.get("errorGroup") or ""
     code = entry.get("errorCode") or ""
     error_type = entry.get("errorType") or ""
     description = entry.get("description") or ""
 
-    text = f"[{group or ' '}]"
+    text = f"[{_severity_label(entry)}]"
     if code and error_type:
         text += f" {code} ({error_type})"
     else:
@@ -93,6 +98,9 @@ def _format_error_entry(entry: dict) -> str:
             text += f" {label}"
     if description:
         text += f": {description}"
+    # startEnd is firmware's isActive: 0 means the error has cleared.
+    if entry.get("startEnd") == 0:
+        text += " (resolved)"
     return text
 
 
@@ -121,7 +129,20 @@ def _format_last_error(pod: dict) -> str:
     if not logs:
         return "None"
     formatted = [f for entry in _sort_errors_newest_first(logs) if (f := _format_error_entry(entry))]
-    return "; ".join(formatted) if formatted else "None"
+    if not formatted:
+        return "None"
+    text = "; ".join(formatted)
+    # HA rejects states over 255 chars; the full list stays in the attributes.
+    return text if len(text) <= 255 else text[:254] + "…"
+
+
+def _last_error_attrs(pod: dict) -> dict[str, Any]:
+    logs = pod.get("error_logs", [])
+    severities = [s for entry in logs if isinstance(s := entry.get("severity"), int)]
+    return {
+        "error_logs": logs,
+        "highest_severity": ERROR_SEVERITY_LABELS.get(max(severities)) if severities else None,
+    }
 
 AnyPlanetpodCoordinator = PlanetpodDataUpdateCoordinator | PlanetpodLocalCoordinator
 
@@ -172,7 +193,15 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
     PlanetpodSensorEntityDescription(
         key="pod_mode",
         name="Pod Mode",
-        value_fn=lambda pod: pod["status"]["pod_mode"],
+        translation_key="pod_mode",
+        device_class=SensorDeviceClass.ENUM,
+        options=list(POD_MODE_LABELS),
+        # A mode added in newer firmware must not break the ENUM state write.
+        value_fn=lambda pod: (
+            None
+            if (mode := pod["status"]["pod_mode"]) is None
+            else mode if mode in POD_MODE_LABELS else "unknown"
+        ),
     ),
     PlanetpodSensorEntityDescription(
         key="deployed_power_kw",
@@ -336,7 +365,7 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
         name="Last Error",
         entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_format_last_error,
-        attr_fn=lambda pod: {"error_logs": pod.get("error_logs", [])},
+        attr_fn=_last_error_attrs,
     ),
 )
 

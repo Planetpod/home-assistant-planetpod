@@ -116,7 +116,25 @@
         }
       },
       "pod_mode": {
-        "name": "Pod Mode"
+        "name": "Pod Mode",
+        "state": {
+          "speed": "Normal",
+          "balance": "Balance",
+          "standby": "Standby",
+          "shortStandby": "Short Standby",
+          "calibration": "Calibration",
+          "cell_health_protect": "Cell Health Protection",
+          "locked": "Locked",
+          "developer": "Developer",
+          "factorycheck": "Factory Check",
+          "cash": "Cash",
+          "solar": "Solar",
+          "solarSmart": "Solar Smart",
+          "solarSmartSpeed": "Solar Smart (Speed)",
+          "solarSmartBalance": "Solar Smart (Balance)",
+          "solarPure": "Solar Pure",
+          "unknown": "Unknown"
+        }
       },
       "deployed_power_kw": {
         "name": "Deployed Power"
@@ -161,6 +179,12 @@
       "soc_lower_limit_pct": {
         "name": "SoC Lower Limit"
       }
+    }
+  },
+  "issues": {
+    "mushroom_missing": {
+      "title": "Install Mushroom to get the Planetpod dashboard",
+      "description": "The Planetpod dashboard uses Mushroom cards, which are not installed. Install Mushroom via HACS (Frontend) and the dashboard is created automatically; restart Home Assistant once to see it in the sidebar. Your Planetpod devices and entities work without it."
     }
   }
 }
