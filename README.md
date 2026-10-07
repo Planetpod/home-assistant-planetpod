@@ -60,7 +60,7 @@ The pod is pointed at Home Assistant's own network instead of Planetpod's cloud,
 
 1. Choose **Local** as the connection type
 2. The wizard shows **Waiting for connection** until the pod's first message arrives (normally within ~10 seconds)
-3. Pick which grid-power reading (**G1 source**) Balance mode should use: the pod's own reported P1 data, or an existing Home Assistant P1/DSMR sensor
+3. Pick a grid-power reading (**G1 source**): the pod's own reported P1 data, or an existing Home Assistant P1/DSMR sensor. This is shown in the **P1 Balance Source** sensor; the pod itself always balances on its own P1/G1 reading
 4. Its device and sensors appear right away; if [Mushroom](https://github.com/piitaya/lovelace-mushroom) is installed, a **"Planetpod"** dashboard is auto-provisioned into the sidebar (see below) — first appears after one HA restart. More pods on the same network are added automatically as soon as they connect.
 
 <details>
@@ -124,7 +124,7 @@ The **Mode** select entity controls how the pod's power setpoint is derived. Mod
 
 | Mode | Behavior | How to activate it |
 |---|---|---|
-| **Balance** | Zero-export target: aims to keep grid import/export near zero using your chosen G1 source. | Select **Balance** in the Mode dropdown — takes effect on its own, no further input needed. |
+| **Balance** | Keeps grid import/export near zero. The pod regulates this itself on its own P1/G1 reading; Home Assistant only switches the mode on. | Select **Balance** in the Mode dropdown — takes effect on its own, no further input needed. |
 | **Standby** | Holds a persistent 0 kW setpoint — the pod neither charges nor discharges. | Select **Standby** — takes effect on its own, no further input needed. |
 | **Speed** | Holds a manually staged kW setpoint for a fixed duration. | Select **Speed** first — this reveals the **Speed Setpoint** (kW) and **Duration** (min) sliders plus a **Send Speed Command** button in the dashboard's Mode card. Set both values, then press the button — nothing applies until you do. |
 | **Planning** | Holds whichever value is set for the *current hour* in the 24-entry hourly schedule (`Planning Hour 00`–`23`, ±kW) — the same source an external optimizer (e.g. EMHASS) could drive. | Select **Planning**, drag each hour's point on the dashboard's Planning chart to the desired kW, then press **Send Planning** — nothing applies until you do. **Mode must actually be set to Planning for the schedule to have any effect** — unlike Send Speed Command, Send Planning has no built-in check for this: it'll happily write your dragged values even while Mode is set to something else, with no warning, and they'll just sit there unused until you switch Mode to Planning. |

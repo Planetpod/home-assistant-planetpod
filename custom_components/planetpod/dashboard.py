@@ -99,6 +99,7 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
     charge_status = _eid(registry, entry_id, serial, "sensor", "charge_status")
     deployed_power = _eid(registry, entry_id, serial, "sensor", "deployed_power_kw")
     requested_power = _eid(registry, entry_id, serial, "sensor", "requested_power_kw")
+    received_by_pod = _eid(registry, entry_id, serial, "sensor", "received_by_pod_power_kw")
     battery_temp = _eid(registry, entry_id, serial, "sensor", "avg_battery_temp_c")
     p1_delivered = _eid(registry, entry_id, serial, "sensor", "balance_g1_power_delivered_kw")
     p1_returned = _eid(registry, entry_id, serial, "sensor", "balance_g1_power_returned_kw")
@@ -115,6 +116,7 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
             charge_status,
             deployed_power,
             requested_power,
+            received_by_pod,
             battery_temp,
             p1_delivered,
             p1_returned,
@@ -138,8 +140,10 @@ def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict
             "kind": "dual_signed",
             "label": "Deployed Power",
             "primary_entity": deployed_power,
-            "secondary_entity": requested_power,
-            "secondary_label": "Requested",
+            # What the pod's controller actually targets. HA's own setpoint is
+            # a grid target in Balance mode and ignored during calibration.
+            "secondary_entity": received_by_pod,
+            "secondary_label": "Received by pod",
             "unit": "kW",
         },
         {

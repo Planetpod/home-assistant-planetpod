@@ -461,6 +461,23 @@ async def test_balance_source_sensor_shows_no_p1_error(hass: HomeAssistant):
     assert state.state == "Can't balance: no P1 sensor"
 
 
+async def test_balance_mode_sends_net_zero_grid_target_not_the_p1_reading(
+    hass: HomeAssistant,
+):
+    """setpoint_kW is the grid target firmware steers to. Sending the live P1
+    reading (here -5.74 for 5.74 kW import) told the pod to export that much."""
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    payload = {**MOCK_LOCAL_PAYLOAD, "g1Data": {"powerDelivered": 5.74, "powerReturned": 0}}
+    coordinator.ingest_post("PP-001", payload)
+    await hass.async_block_till_done()
+    coordinator.set_mode("PP-001", "balance")
+
+    response = coordinator.get_response_for("PP-001")
+
+    assert response["solarSmart"] == {"subMode": "balance", "setpoint_kW": 0.0}
+
+
 async def test_soc_limit_sliders_have_5_to_100_bounds(hass: HomeAssistant):
     """SoC Upper/Lower Limit sliders must never allow a value below 5% --
     a battery-safety floor -- and must cap at 100%.
