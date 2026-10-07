@@ -670,8 +670,9 @@ async def test_last_error_sensor_reflects_errorlogs_from_post(hass: HomeAssistan
     await hass.async_block_till_done()
 
     state = hass.states.get("sensor.planetpod_pp_001_last_error")
-    assert state.state == "[battery] E042 (bms): Cell overvoltage detected"
+    assert state.state == "[Minor warning] E042 (bms): Cell overvoltage detected"
     assert state.attributes["error_logs"][0]["errorCode"] == "E042"
+    assert state.attributes["highest_severity"] == "Minor warning"
 
     registry = er.async_get(hass)
     entry_reg = registry.async_get("sensor.planetpod_pp_001_last_error")
@@ -708,7 +709,7 @@ async def test_last_error_sensor_skips_empty_fields_when_concatenating(
     await hass.async_block_till_done()
 
     state = hass.states.get("sensor.planetpod_pp_001_last_error")
-    assert state.state == "[ ] E405 (Lost cloud connection)"
+    assert state.state == "[Minor error] E405 (Lost cloud connection)"
 
 
 async def test_last_error_sensor_shows_all_errors_newest_first(
@@ -752,8 +753,37 @@ async def test_last_error_sensor_shows_all_errors_newest_first(
 
     state = hass.states.get("sensor.planetpod_pp_001_last_error")
     assert state.state == (
-        "[warning] E402 (Reboot): Had a reboot, reason: 05; [ ] E405 (Lost cloud connection)"
+        "[Info] E402 (Reboot): Had a reboot, reason: 05 (resolved); "
+        "[Minor error] E405 (Lost cloud connection)"
     )
+
+
+async def test_last_error_sensor_truncates_to_ha_state_limit(hass: HomeAssistant):
+    """Six long errors exceed HA's 255-char state limit; the state is trimmed
+    while the full list stays in the attributes."""
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+
+    errors = [
+        {
+            "timestamp": f"2026-10-07 10:0{i}:00",
+            "errorCode": f"E04{i}",
+            "errorType": "BMS Alarm",
+            "description": "Critical battery failure level 03 (alarm) detected during operation",
+            "severity": 5,
+            "errorGroup": "",
+            "startEnd": 1,
+        }
+        for i in range(6)
+    ]
+    coordinator.ingest_post("PP-001", {**MOCK_LOCAL_PAYLOAD, "errorLogs": errors})
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.planetpod_pp_001_last_error")
+    assert len(state.state) == 255
+    assert state.state.endswith("…")
+    assert len(state.attributes["error_logs"]) == 6
+    assert state.attributes["highest_severity"] == "Fatal"
 
 
 async def test_always_present_command_fields_default_false(hass: HomeAssistant):

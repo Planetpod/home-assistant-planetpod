@@ -83,3 +83,34 @@ ATTR_ATTRIBUTION_LOCAL = "Data provided by your Planetpod (local)"
 # represent a requested kW the pod should hold.
 PLANNING_HOURS: tuple[int, ...] = tuple(range(24))
 DEFAULT_PLANNING_POWER_KW = 0.0
+
+# podStatus.podMode as sent in every POST (firmware Podmode[]), plus the
+# extra values the cloud's pod_status.pod_modus enum can return. "speed" is
+# the firmware's normal mode: it follows the requested setpoint.
+POD_MODE_LABELS: dict[str, str] = {
+    "speed": "Normal",
+    "balance": "Balance",
+    "standby": "Standby",
+    "shortStandby": "Short Standby",
+    "calibration": "Calibration",
+    "cell_health_protect": "Cell Health Protection",
+    "locked": "Locked",
+    "developer": "Developer",
+    "factorycheck": "Factory Check",
+    "cash": "Cash",
+    "solar": "Solar",
+    "solarSmart": "Solar Smart",
+    "solarSmartSpeed": "Solar Smart (Speed)",
+    "solarSmartBalance": "Solar Smart (Balance)",
+    "solarPure": "Solar Pure",
+    "unknown": "Unknown",
+}
+
+# errorLogs[].severity, firmware's e_Error_Severety (ErrorLogger.h).
+ERROR_SEVERITY_LABELS: dict[int, str] = {
+    1: "Info",
+    2: "Minor warning",
+    3: "Minor error",
+    4: "Major error",
+    5: "Fatal",
+}
