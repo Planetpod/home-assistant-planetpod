@@ -13,18 +13,9 @@ planetpod_get.ts`) directly:
 - `Actual_power_delivered_p1`/`Actual_power_returned_p1` are sent as STRINGS
   (`.toString()` in the cloud, `cJSON_IsString` in firmware <=1.1.5), not
   numbers, and are capitalized.
-- IMPORTANT CAVEAT (confirmed, not just suspected): the real zero-export
-  formula for Balance mode does not live in the cloud at all. The cloud only
-  ever forwards a target grid-power setpoint (`solarSmart.setpoint_kW`,
-  0 = net-zero by default); the actual closed-loop convergence toward that
-  target runs in firmware itself (`SolarMode.cpp`, a PI controller with
-  Kp=0/Ki=0.05, using the pod's own live/averaged P1 readings). Directly
-  mirroring instantaneous net export 1:1 as done below is a placeholder that
-  conflates "the target to send" with "the live control-loop input firmware
-  computes on its own" -- it will behave far noisier than real firmware
-  control and should not be treated as verified. It's also currently
-  unreachable in cloud production: `sub_mode` is read but never written
-  anywhere in orm-planetpod-v2, so this code path never actually fires there.
+- In Balance mode `solarSmart.setpoint_kW` is the target GRID power, not a
+  battery power: firmware's PI loop (`SolarMode.cpp`) drives its own P1
+  reading toward it. HA sends 0 (net zero) and leaves the regulating to it.
 - "standby" is an HA-side-only concept (confirmed to match how the real
   cloud's own standby feature works): firmware has no wire-level "standby"
   subMode at all -- anything other than exactly "balance" falls through to
@@ -56,13 +47,10 @@ def compute_get_response(
     per pod, with that pod's own values, not a single shared result mirrored
     to every pod on the install.
     """
-    net_export_kw = None
-    if g1_power_delivered_kw is not None or g1_power_returned_kw is not None:
-        net_export_kw = (g1_power_returned_kw or 0) - (g1_power_delivered_kw or 0)
-
     if mode == "balance":
-        # PLACEHOLDER FORMULA -- see module docstring.
-        setpoint_kw = round(net_export_kw, 3) if net_export_kw is not None else 0.0
+        # Grid target of net zero, not the live P1 reading: sending the
+        # reading made the target flip sign every GET.
+        setpoint_kw = 0.0
         wire_sub_mode = "balance"
     elif mode == "standby":
         setpoint_kw = 0.0
