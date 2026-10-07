@@ -13,6 +13,39 @@ Both connection types expose the same [sensors](#sensors); Local mode additional
 
 ---
 
+## Requirements
+
+- Home Assistant 2024.7.0 or later
+- A Planetpod account with an active battery
+
+Each mode has its own extra requirements, listed in its section below.
+
+## Install via HACS
+
+Click the button below to add the repository to HACS on your Home Assistant instance:
+
+[![Open your Home Assistant instance and add this repository to HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Planetpod&repository=home-assistant-planetpod&category=integration)
+
+Then click **Download**, and pick the version that matches the mode you want:
+
+- **Cloud mode:** the latest stable release.
+- **Local mode:** the newest **v1.1.0-beta** release. Local mode is only in the beta releases for now. In the download dialog, enable **Show beta versions** to see them. Afterwards, do **not** accept the "update" HACS offers to the stable release: that installs v1.0.0, which has no Local mode.
+
+Restart Home Assistant after downloading, then follow the section for your mode.
+
+<details>
+<summary>Manual steps (if the button doesn't work)</summary>
+
+1. Open HACS in Home Assistant
+2. Click the three-dot menu (⋮) in the top right and select **Custom repositories**
+3. Paste `https://github.com/Planetpod/home-assistant-planetpod` and set category to **Integration**
+4. Click **Add**
+5. Search for **Planetpod**, click **Download** (pick the version as described above), confirm, and restart Home Assistant
+
+</details>
+
+---
+
 <details>
 <summary><strong>☁️ Cloud mode</strong></summary>
 
@@ -29,6 +62,11 @@ Sensor data is routed through Planetpod's servers via the Open API. This is the 
 
 > Generating a new token revokes the previous one. If you rotate the token, Home Assistant will show a re-authentication banner — enter the new token there.
 
+### Set up
+
+1. Go to **Settings → Devices & Services → Add Integration** and search for **Planetpod**
+2. Choose **Cloud** and paste the token
+
 ### Token expiry & re-authentication
 
 Tokens expire after 1 year by default. When a token expires or is revoked, Home Assistant displays a **Re-authenticate** banner on the integration. Tap it, enter a new token generated from the app, and the integration resumes automatically.
@@ -36,11 +74,13 @@ Tokens expire after 1 year by default. When a token expires or is revoked, Home 
 </details>
 
 <details>
-<summary><strong>🏠 Local mode</strong> (WIP — <code>feat/localMode</code> branch)</summary>
+<summary><strong>🏠 Local mode</strong> (beta)</summary>
 
-The pod is pointed at Home Assistant's own network instead of Planetpod's cloud, and talks to a local HTTP endpoint HA exposes at `/planetpod` — no cloud round-trip.
+The pod talks directly to Home Assistant over your own network, through a local HTTP endpoint HA exposes at `/planetpod`, so commands and data don't make a cloud round-trip. The pod keeps its normal connection to Planetpod's cloud alongside it.
 
-> Requires **pod firmware 1.1.11 or later**. One Planetpod integration handles **every pod on your network**: each pod gets its own device, entities and dashboard view, and is controlled independently.
+> Requires **pod firmware 1.1.11 or later** and the **beta release** (see [Install via HACS](#install-via-hacs)). One Planetpod integration handles **every pod on your network**: each pod gets its own device, entities and dashboard view, and is controlled independently.
+
+> **Privacy:** Local mode does not send any sensitive information anywhere — only battery telemetry/control data (the same fields listed in [Sensors](#sensors)) and the connection to Planetpod's cloud that already exists independently of this integration.
 
 ### How the read/write cycle works
 
@@ -50,9 +90,8 @@ The pod is pointed at Home Assistant's own network instead of Planetpod's cloud,
 
 ### Before you start
 
-1. **Install the beta release.** Local mode is only in the beta releases for now. In HACS open **Planetpod → ⋮ (top right) → Redownload**, pick **v1.1.0-beta.51** in the version list (if it isn't listed, enable **Show beta versions** first), download, and restart Home Assistant. Do **not** accept the "update" HACS then offers to the stable release: that installs v1.0.0, which has no Local mode.
-2. **Let Planetpod switch your pod to Home Assistant control.** The pod only accepts commands from Home Assistant while it's in Home Assistant mode (`open_homeAssistant`). A switch for this in the app is coming; until then, ask Planetpod support to set it. Without it you still see live data, but every command is ignored.
-3. **Make sure the pod can reach Home Assistant at `http://homeassistant.local:8123`.** The pod always connects to that address (it's fixed in the firmware). This works with a default Home Assistant OS install on the same network as the pod. It does **not** work if you renamed Home Assistant's hostname, changed its port, serve it over HTTPS only, or keep the pod on a separate network/VLAN that HA can't be reached from.
+1. **Let Planetpod switch your pod to Home Assistant control.** The pod only accepts commands from Home Assistant while it's in Home Assistant mode (`open_homeAssistant`). A switch for this in the app is coming; until then, ask Planetpod support to set it. Without it you still see live data, but every command is ignored.
+2. **Make sure the pod can reach Home Assistant at `http://homeassistant.local:8123`.** The pod always connects to that address (it's fixed in the firmware). This works with a default Home Assistant OS install on the same network as the pod. It does **not** work if you renamed Home Assistant's hostname, changed its port, serve it over HTTPS only, or keep the pod on a separate network/VLAN that HA can't be reached from.
 
 ### Follow the setup wizard
 
@@ -75,7 +114,7 @@ The pod is pointed at Home Assistant's own network instead of Planetpod's cloud,
 <details>
 <summary>Stuck on "Waiting for connection"?</summary>
 
-1. Check that `http://homeassistant.local:8123` opens Home Assistant from another device on the **same network as the pod**. If it doesn't, see step 3 of [Before you start](#before-you-start).
+1. Check that `http://homeassistant.local:8123` opens Home Assistant from another device on the **same network as the pod**. If it doesn't, see step 2 of [Before you start](#before-you-start).
 2. Check that the pod is online in the Planetpod app.
 3. In Home Assistant, open **Settings → System → Logs** and search for `PLANETPOD`. Every message from a pod is logged as `POST /planetpod received from <ip>`. No such lines means the pod isn't reaching Home Assistant at all (network/address problem); lines present but the wizard still waiting means something else is wrong, so contact Planetpod support with those log lines.
 
@@ -266,40 +305,6 @@ A few things worth knowing before wiring this up:
 </details>
 
 ---
-
-## Requirements
-
-- Home Assistant 2024.4.0 or later
-- A Planetpod account with an active battery
-- **Pod firmware 1.1.11 or later** (required for Local mode)
-- **Cloud mode:** a Planetpod Open API token (generated in the app)
-- **Local mode:** the pod on the same network as Home Assistant, with Home Assistant reachable at `http://homeassistant.local:8123` (see [Before you start](#before-you-start)). One integration handles any number of pods, each controlled independently.
-- **Optional, for the sidebar dashboard:** [Mushroom](https://github.com/piitaya/lovelace-mushroom) via HACS (see [Sidebar dashboard](#sidebar-dashboard))
-
-> **Privacy:** Local mode does not send any sensitive information anywhere — only battery telemetry/control data (the same fields listed in [Sensors](#sensors)) and the connection to Planetpod's cloud that already exists independently of this integration.
-
-## Step 1: Install via HACS
-
-Click the button below to add the repository to HACS on your Home Assistant instance:
-
-[![Open your Home Assistant instance and add this repository to HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Planetpod&repository=home-assistant-planetpod&category=integration)
-
-Then in HACS, click **Download**, confirm, and restart Home Assistant.
-
-<details>
-<summary>Manual steps (if the button doesn't work)</summary>
-
-1. Open HACS in Home Assistant
-2. Click the three-dot menu (⋮) in the top right and select **Custom repositories**
-3. Paste `https://github.com/Planetpod/home-assistant-planetpod` and set category to **Integration**
-4. Click **Add**
-5. Search for **Planetpod**, click **Download**, confirm, and restart Home Assistant
-
-</details>
-
-## Step 2: Setup
-
-See the **☁️ Cloud mode** or **🏠 Local mode** section above for the connection-specific wizard steps.
 
 ## Sensors
 

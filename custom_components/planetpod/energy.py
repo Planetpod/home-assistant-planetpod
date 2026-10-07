@@ -32,9 +32,18 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfEnergy
-from homeassistant.core import Event, EventStateChangedData, HomeAssistant, callback
+from homeassistant.core import (
+    Event,
+    EventStateChangedData,
+    EventStateReportedData,
+    HomeAssistant,
+    callback,
+)
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.event import (
+    async_track_state_change_event,
+    async_track_state_report_event,
+)
 from homeassistant.helpers.restore_state import RestoreEntity
 
 from .const import ATTR_ATTRIBUTION, DOMAIN, MANUFACTURER
@@ -164,6 +173,13 @@ class PlanetpodEnergyIntegrationSensor(RestoreEntity, SensorEntity):
                 self.hass, [source_entity_id], self._handle_source_change
             )
         )
+        # A constant power (e.g. a steady 1.6 kW calibration charge) never
+        # fires state_changed, so also integrate on every unchanged write.
+        self.async_on_remove(
+            async_track_state_report_event(
+                self.hass, [source_entity_id], self._handle_source_report
+            )
+        )
 
     @callback
     def _handle_source_change(self, event: Event[EventStateChangedData]) -> None:
@@ -171,12 +187,25 @@ class PlanetpodEnergyIntegrationSensor(RestoreEntity, SensorEntity):
         old_state = event.data["old_state"]
         if new_state is None:
             return
+        if self._last_source_state is None and old_state is not None:
+            try:
+                self._last_source_state = (float(old_state.state), old_state.last_updated)
+            except (TypeError, ValueError):
+                pass
+        self._accumulate(new_state.state, new_state.last_updated)
+
+    @callback
+    def _handle_source_report(self, event: Event[EventStateReportedData]) -> None:
+        self._accumulate(event.data["new_state"].state, event.data["last_reported"])
+
+    @callback
+    def _accumulate(self, raw_value: str, now: datetime) -> None:
+        """Add the trapezoid since the previous sample, then record this one."""
         try:
-            new_value = float(new_state.state)
+            new_value = float(raw_value)
         except (TypeError, ValueError):
             return
 
-        now = new_state.last_updated
         if self._last_source_state is not None:
             prev_value, prev_time = self._last_source_state
             hours = (now - prev_time).total_seconds() / 3600
@@ -185,12 +214,6 @@ class PlanetpodEnergyIntegrationSensor(RestoreEntity, SensorEntity):
                 self._attr_native_value = round(
                     (self._attr_native_value or 0.0) + avg_power_kw * hours, 4
                 )
-        elif old_state is not None:
-            try:
-                prev_value = float(old_state.state)
-                self._last_source_state = (prev_value, old_state.last_updated)
-            except (TypeError, ValueError):
-                pass
 
         self._last_source_state = (new_value, now)
         self.async_write_ha_state()

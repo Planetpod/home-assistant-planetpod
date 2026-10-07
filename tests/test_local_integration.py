@@ -1350,3 +1350,26 @@ async def test_pre_upgrade_flat_option_is_inherited_not_reset_to_default(
 
     assert coordinator.mode("PP-001") == "balance"
     assert coordinator.mode("PP-002") == "speed"
+
+
+async def test_battery_net_energy_counts_a_constant_charge_power(hass: HomeAssistant, freezer):
+    """A steady charge (e.g. 1.6 kW during calibration) never changes the
+    Deployed Power state, so it fires no state_changed events -- the energy
+    sensor must still integrate it."""
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    payload = {
+        **MOCK_LOCAL_PAYLOAD,
+        "podStatus": {"podChargingStatus": "charge", "podMode": "calibration"},
+        "powerCalculationInfo": {"requestedAcPower": 1600, "podCalcDeployAcPowerWatt": 1600},
+    }
+
+    for _ in range(31):  # first POST + 30 more, 10 s apart = 300 s at 1.6 kW
+        coordinator.ingest_post("PP-001", payload)
+        await hass.async_block_till_done()
+        freezer.tick(10)
+
+    assert hass.states.get("sensor.planetpod_pp_001_deployed_power").state == "1.6"
+    energy = float(hass.states.get("sensor.planetpod_pp_001_battery_net_energy").state)
+    # Counting starts at the 2nd POST (the 1st creates the entities), so ~290 s.
+    assert energy == pytest.approx(1.6 * 290 / 3600, abs=0.003)
