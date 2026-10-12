@@ -360,9 +360,9 @@ Local mode shows the pod's error messages in the **Last Error** sensor, and ever
 | Severity | Meaning | What to do |
 |---|---|---|
 | **Info** | Normal operation: firmware updates, restarts, calibration start/finish | Nothing |
-| **Minor warning** | The pod noticed something and handles it itself | Nothing, unless it keeps repeating |
-| **Minor error** | Something failed temporarily, e.g. a lost cloud connection or a communication retry | Usually recovers by itself; contact Planetpod if it persists |
-| **Major error** | The pod limits or stops operation to protect the battery | Contact Planetpod if it doesn't clear |
+| **Minor warning** | The pod noticed something; operation isn't affected | Nothing, no need for concern |
+| **Minor error** | Something failed temporarily, e.g. a lost cloud connection or a communication retry; operation isn't affected | Nothing, it recovers by itself |
+| **Major error** | A condition that requires the pod to stop, mostly a temperature limit or the AC supply switching off. The pod goes idle (no charging or discharging) until the condition clears | Contact Planetpod if it doesn't clear |
 | **Fatal** | The pod has stopped for safety | Contact Planetpod |
 
 Messages you're most likely to see:
@@ -374,10 +374,10 @@ Messages you're most likely to see:
 | E402 | Info | The pod restarted (reason included) | None, unless it repeats often |
 | E300 / E901 | Info | Calibration scheduled / finished | None |
 | E060 | Info | Discharge current limited near the low voltage limit | None |
-| E405 | Minor error | Lost connection to the Planetpod cloud; "(resolved)" when it's back | Only if it stays unresolved: check the pod's WiFi/internet |
+| E405 | Minor error | Lost connection to the Planetpod cloud; "(resolved)" when it's back | None, it recovers by itself |
 | E406 | Minor warning | The pod stays in short standby because another error persists; resolves automatically | Look at the other active errors |
 | E902 | Minor warning | Calibration aborted due to overvoltage | None, unless it keeps happening |
-| E501 | Minor error | A discharge was requested while SoC is below 3% | Check your SoC Lower Limit / EMS logic |
+| E501 | Minor error | A discharge was requested while SoC is below 3% | None |
 | E036C | Major error | SoC below minimum; the pod starts a calibration run | None; wait for calibration to finish |
 | E013 / E035 | Major error | Pod or cell temperature above its limit | Check ventilation around the pod; contact Planetpod if it persists |
 | E043, E044, E046, E048–E053 | Fatal | Critical BMS alarm (over-voltage, over-current, temperature) | Contact Planetpod |
