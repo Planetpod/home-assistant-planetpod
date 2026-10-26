@@ -28,7 +28,7 @@
       },
       "local_connect": {
         "title": "Connect your Planetpod",
-        "description": "Your battery automatically tries the cloud first, then falls back to this Home Assistant instance if the cloud isn't reachable.\n\n**Home Assistant address:** `{ha_address}`\n\n⏳ Waiting for connection… Press Submit to check again.",
+        "description": "Your Planetpod connects to this Home Assistant by itself, at `http://homeassistant.local:8123`. This address is fixed and can't be changed.\n\nBefore it can connect:\n1. In the Planetpod app, go to **Instellingen → Batterijmodus → Open → Home Assistant**, and press **Verbinden** on **Home Assistant Lokaal**.\n2. Home Assistant must be reachable at `http://homeassistant.local:8123` from the network your Planetpod is on. This works by default with Home Assistant OS.\n\n⏳ **Waiting for your Planetpod…** This usually takes about 10 seconds after both are ready. Press **Submit** to check again.\n\nStill waiting? See [Connection troubleshooting](https://github.com/Planetpod/home-assistant-planetpod#connection-troubleshooting).",
         "data": {}
       },
       "reconfigure": {
