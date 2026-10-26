@@ -194,19 +194,6 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
         value_fn=lambda pod: pod["status"]["app_mode"],
     ),
     PlanetpodSensorEntityDescription(
-        key="pod_mode",
-        name="Pod Mode",
-        translation_key="pod_mode",
-        device_class=SensorDeviceClass.ENUM,
-        options=list(POD_MODE_LABELS),
-        # A mode added in newer firmware must not break the ENUM state write.
-        value_fn=lambda pod: (
-            None
-            if (mode := pod["status"]["pod_mode"]) is None
-            else mode if mode in POD_MODE_LABELS else "unknown"
-        ),
-    ),
-    PlanetpodSensorEntityDescription(
         key="deployed_power_kw",
         name="Deployed Power",
         native_unit_of_measurement=UnitOfPower.KILO_WATT,
@@ -305,10 +292,25 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda pod: pod["battery"]["soc_lower_limit_pct"],
     ),
-    # Local-mode only: pod.get("balance") doesn't exist for cloud entries,
-    # so these stay "unknown" there rather than raising. Named with a "P1"
-    # prefix so they sort together, separate from the battery sensors above,
-    # on the device page.
+)
+
+# Local-only: their data comes from the pod's POST to HA, which the cloud API
+# doesn't provide, so they are created for local entries only.
+LOCAL_SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
+    PlanetpodSensorEntityDescription(
+        key="pod_mode",
+        name="Pod Mode",
+        translation_key="pod_mode",
+        device_class=SensorDeviceClass.ENUM,
+        options=list(POD_MODE_LABELS),
+        # A mode added in newer firmware must not break the ENUM state write.
+        value_fn=lambda pod: (
+            None
+            if (mode := pod["status"]["pod_mode"]) is None
+            else mode if mode in POD_MODE_LABELS else "unknown"
+        ),
+    ),
+    # Named with a "P1" prefix so they sort together on the device page.
     PlanetpodSensorEntityDescription(
         key="balance_source",
         name="P1 Balance Source",
@@ -372,9 +374,14 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
     ),
 )
 
-# Cloud-only: the cloud API supplies a computed "g1" section; local pod data
-# has none (Local pods have the P1 Power Delivered/Returned sensors instead).
-G1_SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
+# Cloud-only: kept exactly as before local mode existed. The cloud API also
+# supplies the computed "g1" section, which local pod data doesn't have.
+CLOUD_SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
+    PlanetpodSensorEntityDescription(
+        key="pod_mode",
+        name="Pod Mode",
+        value_fn=lambda pod: pod["status"]["pod_mode"],
+    ),
     PlanetpodSensorEntityDescription(
         key="g1_solar_power_kw",
         name="G1 Solar Power",
@@ -428,9 +435,10 @@ async def async_setup_entry(
 
     known_serials: set[str] = set()
     known_energy_ids: set[str] = set()
-    descriptions = SENSOR_DESCRIPTIONS
-    if entry.data.get(CONF_CONNECTION_TYPE) != CONNECTION_TYPE_LOCAL:
-        descriptions += G1_SENSOR_DESCRIPTIONS
+    is_local = entry.data.get(CONF_CONNECTION_TYPE) == CONNECTION_TYPE_LOCAL
+    descriptions = SENSOR_DESCRIPTIONS + (
+        LOCAL_SENSOR_DESCRIPTIONS if is_local else CLOUD_SENSOR_DESCRIPTIONS
+    )
 
     def _add_new_pods() -> None:
         """Add sensors for any pods not yet registered."""
@@ -446,14 +454,15 @@ async def async_setup_entry(
         if new_entities:
             async_add_entities(new_entities, False)
 
-        # Backs the Energy dashboard card -- integrates P1/deployed power
-        # into kWh. Registered after the pod's power sensors above so their
-        # unique_ids already exist in the entity registry for lookup.
-        hass.async_create_task(
-            async_setup_energy_entities(
-                hass, entry, lambda ents: async_add_entities(ents, False), known_energy_ids, pods
+        # Backs the local dashboard's Energy card -- integrates P1/deployed
+        # power into kWh. Registered after the pod's power sensors above so
+        # their unique_ids already exist in the entity registry for lookup.
+        if is_local:
+            hass.async_create_task(
+                async_setup_energy_entities(
+                    hass, entry, lambda ents: async_add_entities(ents, False), known_energy_ids, pods
+                )
             )
-        )
 
     # Register initial pods
     _add_new_pods()
