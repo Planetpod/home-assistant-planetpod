@@ -16,6 +16,7 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     PERCENTAGE,
+    UnitOfElectricCurrent,
     UnitOfPower,
     UnitOfTemperature,
     UnitOfElectricPotential,
@@ -28,6 +29,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
     ATTR_ATTRIBUTION,
+    CONF_CONNECTION_TYPE,
+    CONNECTION_TYPE_LOCAL,
     DOMAIN,
     ERROR_SEVERITY_LABELS,
     MANUFACTURER,
@@ -369,6 +372,51 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
     ),
 )
 
+# Cloud-only: the cloud API supplies a computed "g1" section; local pod data
+# has none (Local pods have the P1 Power Delivered/Returned sensors instead).
+G1_SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
+    PlanetpodSensorEntityDescription(
+        key="g1_solar_power_kw",
+        name="G1 Solar Power",
+        native_unit_of_measurement=UnitOfPower.KILO_WATT,
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda pod: pod.get("g1", {}).get("solar_power_kw"),
+    ),
+    PlanetpodSensorEntityDescription(
+        key="g1_raw_solar_current_a",
+        name="G1 Raw Solar Current",
+        native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
+        device_class=SensorDeviceClass.CURRENT,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda pod: pod.get("g1", {}).get("raw_solar_current_a"),
+    ),
+    PlanetpodSensorEntityDescription(
+        key="g1_solar_phase",
+        name="G1 Solar Phase",
+        translation_key="g1_solar_phase",
+        device_class=SensorDeviceClass.ENUM,
+        options=["single", "three"],
+        value_fn=lambda pod: pod.get("g1", {}).get("solar_phase"),
+    ),
+    PlanetpodSensorEntityDescription(
+        key="g1_grid_import_power_kw",
+        name="G1 Grid Import Power",
+        native_unit_of_measurement=UnitOfPower.KILO_WATT,
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda pod: pod.get("g1", {}).get("grid_import_power_kw"),
+    ),
+    PlanetpodSensorEntityDescription(
+        key="g1_grid_export_power_kw",
+        name="G1 Grid Export Power",
+        native_unit_of_measurement=UnitOfPower.KILO_WATT,
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda pod: pod.get("g1", {}).get("grid_export_power_kw"),
+    ),
+)
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -380,6 +428,9 @@ async def async_setup_entry(
 
     known_serials: set[str] = set()
     known_energy_ids: set[str] = set()
+    descriptions = SENSOR_DESCRIPTIONS
+    if entry.data.get(CONF_CONNECTION_TYPE) != CONNECTION_TYPE_LOCAL:
+        descriptions += G1_SENSOR_DESCRIPTIONS
 
     def _add_new_pods() -> None:
         """Add sensors for any pods not yet registered."""
@@ -390,7 +441,7 @@ async def async_setup_entry(
             if not serial or serial in known_serials:
                 continue
             known_serials.add(serial)
-            for description in SENSOR_DESCRIPTIONS:
+            for description in descriptions:
                 new_entities.append(PlanetpodSensor(coordinator, entry, description, serial))
         if new_entities:
             async_add_entities(new_entities, False)

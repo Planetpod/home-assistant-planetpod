@@ -1373,3 +1373,16 @@ async def test_battery_net_energy_counts_a_constant_charge_power(hass: HomeAssis
     energy = float(hass.states.get("sensor.planetpod_pp_001_battery_net_energy").state)
     # Counting starts at the 2nd POST (the 1st creates the entities), so ~290 s.
     assert energy == pytest.approx(1.6 * 290 / 3600, abs=0.003)
+
+
+async def test_local_pods_get_no_cloud_only_g1_sensors(hass: HomeAssistant):
+    """The G1 sensors read the cloud API's "g1" section, which local pod data
+    doesn't have -- they must not be created for local entries."""
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    assert hass.states.get("sensor.planetpod_pp_001_state_of_charge") is not None
+    g1_states = [s.entity_id for s in hass.states.async_all("sensor") if "_g1_" in s.entity_id]
+    assert g1_states == []
