@@ -2,6 +2,8 @@
 
 Monitor and control your Planetpod solar battery from Home Assistant. Two connection types are available, chosen when you add the integration — pick whichever section below matches your setup.
 
+You can find the Planetpod manual with more information here: https://drive.google.com/file/d/1IeO2Q0d3dYZvWA1crQhpNoZgeBQ3qnKK/view
+
 | | Cloud | Local |
 |---|---|---|
 | Data path | Through Planetpod's servers (Open API) | Direct, pod ↔ Home Assistant on your LAN |
@@ -90,7 +92,7 @@ The pod talks directly to Home Assistant over your own network, through a local 
 
 ### Before you start
 
-1. **Let Planetpod switch your pod to Home Assistant control.** The pod only accepts commands from Home Assistant while it's in Home Assistant mode (`open_homeAssistant`). A switch for this in the app is coming; until then, ask Planetpod support to set it. Without it the pod doesn't contact Home Assistant at all: no data and no commands.
+1. **Switch your pod to Home Assistant control.** The pod only accepts commands from Home Assistant while it's in Home Assistant mode (`open_homeAssistant`). In the Planetpod app, go to **Instellingen → Batterijmodus → Open → Home Assistant**, and press **Verbinden** on **Home Assistant Lokaal**. Without it the pod doesn't contact Home Assistant at all: no data and no commands.
 2. **Make sure the pod can reach Home Assistant at `http://homeassistant.local:8123`.** The pod always connects to that address (it's fixed in the firmware). This works with a default Home Assistant OS install on the same network as the pod. It does **not** work if you renamed Home Assistant's hostname, changed its port, serve it over HTTPS only, or keep the pod on a separate network/VLAN that HA can't be reached from. See [Connection troubleshooting](#connection-troubleshooting).
 
 ### Follow the setup wizard
@@ -111,61 +113,7 @@ The pod talks directly to Home Assistant over your own network, through a local 
 
 </details>
 
-### Connection troubleshooting
-
-If the setup wizard stays on **Waiting for connection**, or the pod shows as **offline** in Home Assistant, the pod isn't reaching Home Assistant.
-
-<details>
-<summary>How the connection works</summary>
-
-The pod connects to Home Assistant, not the other way round. Every ~10 seconds it sends its data to, and fetches its commands from, `http://homeassistant.local:8123/planetpod`. For that to work, all of these must be true:
-
-| Requirement | Why |
-|---|---|
-| The pod is online (WiFi and internet) | The pod learns from the Planetpod cloud that Home Assistant mode is on. After every pod restart it needs the cloud once before it contacts Home Assistant again |
-| The pod is in **Home Assistant mode** | Without it, the pod doesn't contact Home Assistant at all |
-| The name `homeassistant.local` points to your Home Assistant | The pod finds Home Assistant by this name (mDNS), on its own network |
-| Home Assistant answers on port **8123** over plain **HTTP** | The address is fixed in the pod's firmware |
-| The pod's network can reach Home Assistant | No guest network, client isolation or blocking between VLANs |
-
-Home Assistant marks a pod **offline** when nothing has arrived from it for 60 seconds.
-
-</details>
-
-**Work through these checks in order:**
-
-1. **Is the pod online?** Check in the Planetpod app. If it's offline there, fix the pod's WiFi first; the **WiFi Signal Strength** sensor (once connected) should be better than about −75 dBm.
-2. **Is the pod in Home Assistant mode?** Ask Planetpod support to confirm. If the pod restarted recently while the internet was down, it reconnects to Home Assistant only after it has reached the Planetpod cloud again.
-3. **Can your laptop open Home Assistant from the pod's network?** Connect your laptop to the **same WiFi network as the pod**, turn off any VPN, and open `http://homeassistant.local:8123` in the browser (type the `http://` part too):
-   - **Home Assistant opens:** name, port and network are fine; continue with step 6.
-   - **Page not found / can't connect:** continue with steps 4 and 5.
-   - **It only works with `https://`:** see step 4.
-4. **Check Home Assistant's name, port and HTTP:**
-   - **Name:** in **Settings → System → Network**, the hostname must be `homeassistant` (the default). On a Docker/Core install, the host machine itself must answer to `homeassistant.local` (hostname `homeassistant`, with mDNS/Avahi running).
-   - **Port:** Home Assistant must use the default port 8123.
-   - **HTTPS:** if `ssl_certificate` is set under `http:` in `configuration.yaml`, Home Assistant only serves HTTPS and the pod can't connect. Use Nabu Casa or a reverse proxy for HTTPS instead, so Home Assistant itself keeps serving plain HTTP on port 8123.
-   - **Docker:** run the container with `network_mode: host` (the standard Home Assistant setup), so it listens directly on port 8123 of the host.
-   - **Firewall:** on a Core/Docker host, allow incoming traffic on port 8123.
-5. **Check the network between the pod and Home Assistant:**
-   - Put the pod on the same network as Home Assistant, not on a guest network.
-   - Turn off **client isolation** / **AP isolation** for the pod's WiFi.
-   - With separate VLANs or an IoT network: allow traffic from the pod to Home Assistant on port 8123, and forward mDNS between the networks (often called *mDNS reflector* or *multicast forwarding*).
-   - Some mesh systems and routers block multicast between WiFi and wired devices. Look for a setting like *multicast*, *mDNS* or *IGMP snooping*.
-6. **Check whether the pod's messages arrive.**
-   - **If the pod already appears as a device:** open it and look at the **Last POST Received** sensor. A time within the last minute means the connection works.
-   - **If the setup wizard is still waiting** (no device yet), turn on debug logging for Planetpod: go to **Developer Tools → Actions**, choose **Logger: Set level**, switch to YAML mode and run:
-     ```yaml
-     action: logger.set_level
-     data:
-       custom_components.planetpod: debug
-     ```
-     Wait 30 seconds, then open **Settings → System → Logs**, click **Show raw logs**, and search for `PLANETPOD`:
-     - **`POST /planetpod received from <ip>` lines are there:** the pod reaches Home Assistant. If the wizard still waits, contact Planetpod support with these lines.
-     - **No such lines:** the pod isn't reaching Home Assistant; go back over steps 1–5.
-
-     Afterwards, run the same action with `warning` instead of `debug`, or restart Home Assistant, to turn the extra logging off again.
-
-**Still not working?** Contact Planetpod support with: your Home Assistant version and install type (Settings → About), the result of step 3, any `PLANETPOD` log lines, and your router or mesh system model.
+Stuck on **Waiting for connection**, or does the pod show as offline? See [Connection troubleshooting](#connection-troubleshooting).
 
 ### Sidebar dashboard
 
@@ -353,6 +301,66 @@ A few things worth knowing before wiring this up:
 
 ---
 
+## Connection troubleshooting
+
+*For Local mode.*
+
+If the setup wizard stays on **Waiting for connection**, or the pod shows as **offline** in Home Assistant, the pod isn't reaching Home Assistant.
+
+<details>
+<summary>How the connection works</summary>
+
+The pod connects to Home Assistant, not the other way round. Every ~10 seconds it sends its data to, and fetches its commands from, `http://homeassistant.local:8123/planetpod`. For that to work, all of these must be true:
+
+| Requirement | Why |
+|---|---|
+| The pod is online (WiFi and internet) | The pod learns from the Planetpod cloud that Home Assistant mode is on. After every pod restart it needs the cloud once before it contacts Home Assistant again |
+| The pod is in **Home Assistant mode** | Without it, the pod doesn't contact Home Assistant at all |
+| The name `homeassistant.local` points to your Home Assistant | The pod finds Home Assistant by this name (mDNS), on its own network |
+| Home Assistant answers on port **8123** over plain **HTTP** | The address is fixed in the pod's firmware |
+| The pod's network can reach Home Assistant | No guest network, client isolation or blocking between VLANs |
+
+Home Assistant marks a pod **offline** when nothing has arrived from it for 60 seconds.
+
+</details>
+
+**Work through these checks in order:**
+
+1. **Is the pod online?** Check in the Planetpod app. If it's offline there, fix the pod's WiFi first; the **WiFi Signal Strength** sensor (once connected) should be better than about −75 dBm.
+2. **Is the pod in Home Assistant mode?** Ask Planetpod support to confirm. If the pod restarted recently while the internet was down, it reconnects to Home Assistant only after it has reached the Planetpod cloud again.
+3. **Can your laptop open Home Assistant from the pod's network?** Connect your laptop to the **same WiFi network as the pod**, turn off any VPN, and open `http://homeassistant.local:8123` in the browser (type the `http://` part too):
+   - **Home Assistant opens:** name, port and network are fine; continue with step 6.
+   - **Page not found / can't connect:** continue with steps 4 and 5.
+   - **It only works with `https://`:** see step 4.
+4. **Check Home Assistant's name, port and HTTP:**
+   - **Name:** in **Settings → System → Network**, the hostname must be `homeassistant` (the default). On a Docker/Core install, the host machine itself must answer to `homeassistant.local` (hostname `homeassistant`, with mDNS/Avahi running).
+   - **Port:** Home Assistant must use the default port 8123.
+   - **HTTPS:** if `ssl_certificate` is set under `http:` in `configuration.yaml`, Home Assistant only serves HTTPS and the pod can't connect. Use Nabu Casa or a reverse proxy for HTTPS instead, so Home Assistant itself keeps serving plain HTTP on port 8123.
+   - **Docker:** run the container with `network_mode: host` (the standard Home Assistant setup), so it listens directly on port 8123 of the host.
+   - **Firewall:** on a Core/Docker host, allow incoming traffic on port 8123.
+5. **Check the network between the pod and Home Assistant:**
+   - Put the pod on the same network as Home Assistant, not on a guest network.
+   - Turn off **client isolation** / **AP isolation** for the pod's WiFi.
+   - With separate VLANs or an IoT network: allow traffic from the pod to Home Assistant on port 8123, and forward mDNS between the networks (often called *mDNS reflector* or *multicast forwarding*).
+   - Some mesh systems and routers block multicast between WiFi and wired devices. Look for a setting like *multicast*, *mDNS* or *IGMP snooping*.
+6. **Check whether the pod's messages arrive.**
+   - **If the pod already appears as a device:** open it and look at the **Last POST Received** sensor. A time within the last minute means the connection works.
+   - **If the setup wizard is still waiting** (no device yet), turn on debug logging for Planetpod: go to **Developer Tools → Actions**, choose **Logger: Set level**, switch to YAML mode and run:
+     ```yaml
+     action: logger.set_level
+     data:
+       custom_components.planetpod: debug
+     ```
+     Wait 30 seconds, then open **Settings → System → Logs**, click **Show raw logs**, and search for `PLANETPOD`:
+     - **`POST /planetpod received from <ip>` lines are there:** the pod reaches Home Assistant. If the wizard still waits, contact Planetpod support with these lines.
+     - **No such lines:** the pod isn't reaching Home Assistant; go back over steps 1–5.
+
+     Afterwards, run the same action with `warning` instead of `debug`, or restart Home Assistant, to turn the extra logging off again.
+
+**Still not working?** Contact Planetpod support with: your Home Assistant version and install type (Settings → About), the result of step 3, any `PLANETPOD` log lines, and your router or mesh system model.
+
+---
+
 ## Sensors
 
 One device is created per battery (identified by serial number). Energy Pulse (G1) data is included on the same device; multiple Energy Pulses are not supported. The following sensors are available:
@@ -397,6 +405,7 @@ Some sensors may show **Unknown** until the hardware has operated for a period o
 | **Total Cycles** | Populated after a pod (re)boot |
 | **AC Voltage** | Reported by the pod's inverters when Relay Status is `230_ON` — `0` if inverters have not sent data yet, null if inverters are OFF |
 | **Requested Power Received by Pod** | Only non-null when the pod is actively executing a power command — null at idle is expected |
+| **G1 Solar Power / G1 Raw Solar Current / G1 Solar Phase / G1 Grid Import Power / G1 Grid Export Power** | Cloud mode only. Only populated for pods with a G1 module or a standalone P1 meter reporting solar/grid data — stays Unknown for pods without one |
 
 </details>
 
