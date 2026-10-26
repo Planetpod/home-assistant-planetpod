@@ -151,9 +151,19 @@ Home Assistant marks a pod **offline** when nothing has arrived from it for 60 s
    - Turn off **client isolation** / **AP isolation** for the pod's WiFi.
    - With separate VLANs or an IoT network: allow traffic from the pod to Home Assistant on port 8123, and forward mDNS between the networks (often called *mDNS reflector* or *multicast forwarding*).
    - Some mesh systems and routers block multicast between WiFi and wired devices. Look for a setting like *multicast*, *mDNS* or *IGMP snooping*.
-6. **Check whether the pod's messages arrive.** In Home Assistant, open **Settings → System → Logs**, click **Show raw logs**, and search for `PLANETPOD`:
-   - **`POST /planetpod received from <ip>` lines are there:** the connection works. If the wizard still waits or the pod still shows offline, contact Planetpod support with these lines.
-   - **No such lines:** the pod isn't reaching Home Assistant; go back over steps 1–5.
+6. **Check whether the pod's messages arrive.**
+   - **If the pod already appears as a device:** open it and look at the **Last POST Received** sensor. A time within the last minute means the connection works.
+   - **If the setup wizard is still waiting** (no device yet), turn on debug logging for Planetpod: go to **Developer Tools → Actions**, choose **Logger: Set level**, switch to YAML mode and run:
+     ```yaml
+     action: logger.set_level
+     data:
+       custom_components.planetpod: debug
+     ```
+     Wait 30 seconds, then open **Settings → System → Logs**, click **Show raw logs**, and search for `PLANETPOD`:
+     - **`POST /planetpod received from <ip>` lines are there:** the pod reaches Home Assistant. If the wizard still waits, contact Planetpod support with these lines.
+     - **No such lines:** the pod isn't reaching Home Assistant; go back over steps 1–5.
+
+     Afterwards, run the same action with `warning` instead of `debug`, or restart Home Assistant, to turn the extra logging off again.
 
 **Still not working?** Contact Planetpod support with: your Home Assistant version and install type (Settings → About), the result of step 3, any `PLANETPOD` log lines, and your router or mesh system model.
 

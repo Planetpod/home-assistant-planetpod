@@ -38,7 +38,7 @@ def ensure_local_view_registered(hass: HomeAssistant) -> None:
 
     hass.http.register_view(PlanetpodLocalView())
     hass.data[DOMAIN][_VIEW_REGISTERED_KEY] = True
-    _LOGGER.warning("PLANETPOD: HTTP view registered at /planetpod")
+    _LOGGER.debug("PLANETPOD: HTTP view registered at /planetpod")
 
 
 def _get_any_coordinator(hass: HomeAssistant) -> PlanetpodLocalCoordinator | None:
@@ -59,7 +59,7 @@ class PlanetpodLocalView(HomeAssistantView):
 
     async def post(self, request: web.Request) -> web.Response:
         hass: HomeAssistant = request.app["hass"]
-        _LOGGER.warning("PLANETPOD: POST /planetpod received from %s", request.remote)
+        _LOGGER.debug("PLANETPOD: POST /planetpod received from %s", request.remote)
 
         try:
             payload = await request.json()
@@ -76,26 +76,25 @@ class PlanetpodLocalView(HomeAssistantView):
             _LOGGER.warning("PLANETPOD: POST /planetpod missing systemInfo.podSerialNumber")
             return web.Response(status=400, text="Missing systemInfo.podSerialNumber")
 
-        # Mirrors the GET handler logging its full response below -- the
-        # actual payload content, not just serial/source, so it's visible
-        # directly in HA's logs without digging through entity attributes.
-        _LOGGER.warning("PLANETPOD: POST /planetpod payload for serial=%s: %s", serial, payload)
+        # Debug only: one line per pod every ~10 s would flood HA's log.
+        # Turn on debug logging for Planetpod to see the full payloads.
+        _LOGGER.debug("PLANETPOD: POST /planetpod payload for serial=%s: %s", serial, payload)
 
         coordinator = _get_any_coordinator(hass)
         if coordinator is not None:
-            _LOGGER.warning("PLANETPOD: POST /planetpod ingested by coordinator, serial=%s", serial)
+            _LOGGER.debug("PLANETPOD: POST /planetpod ingested by coordinator, serial=%s", serial)
             coordinator.ingest_post(serial, payload)
         else:
-            _LOGGER.warning("PLANETPOD: POST /planetpod buffered as pending, serial=%s (no coordinator yet)", serial)
+            _LOGGER.debug("PLANETPOD: POST /planetpod buffered as pending, serial=%s (no coordinator yet)", serial)
             hass.data.setdefault(DOMAIN, {}).setdefault(PENDING_PODS_KEY, {})[serial] = payload
         return web.Response(status=200, text="success")
 
     async def get(self, request: web.Request) -> web.Response:
         hass: HomeAssistant = request.app["hass"]
-        _LOGGER.warning("PLANETPOD: GET /planetpod received from %s, query=%s", request.remote, dict(request.query))
+        _LOGGER.debug("PLANETPOD: GET /planetpod received from %s, query=%s", request.remote, dict(request.query))
         coordinator = _get_any_coordinator(hass)
         if coordinator is None:
-            _LOGGER.warning("PLANETPOD: GET /planetpod -- no coordinator set up yet (503)")
+            _LOGGER.debug("PLANETPOD: GET /planetpod -- no coordinator set up yet (503)")
             return web.Response(status=503, text="Planetpod Local not configured")
 
         serial = request.query.get(QUERY_PARAM_SERIAL)
@@ -119,5 +118,5 @@ class PlanetpodLocalView(HomeAssistantView):
         if response is None:
             return web.Response(status=404, text=f"Unknown pod serial: {serial}")
 
-        _LOGGER.warning("PLANETPOD: GET /planetpod response for serial=%s: %s", serial, response)
+        _LOGGER.debug("PLANETPOD: GET /planetpod response for serial=%s: %s", serial, response)
         return web.json_response(response)
