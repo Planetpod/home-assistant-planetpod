@@ -2,6 +2,13 @@
   "config": {
     "step": {
       "user": {
+        "title": "How does your Planetpod connect?",
+        "description": "Cloud: connects through PlanetPod's cloud service. Works out of the box, requires an internet connection.\n\nLocal: connects directly to your battery over your home network. Useful to run your own algorithms and automations against it.",
+        "data": {
+          "connection_type": "Connection type"
+        }
+      },
+      "cloud": {
         "title": "Connect to Planetpod",
         "description": "Enter your Planetpod Open API credentials. You can generate a key in the Planetpod app under Settings → API.",
         "data": {
@@ -11,6 +18,19 @@
           "api_key": "Bearer token starting with pp_"
         }
       },
+      "local_g1": {
+        "title": "Planetpod",
+        "description": "Which grid meter reading should Balance mode use?",
+        "data": {
+          "g1_source": "G1 source",
+          "g1_ha_entity_id": "Home Assistant sensor"
+        }
+      },
+      "local_connect": {
+        "title": "Connect your Planetpod",
+        "description": "Your Planetpod connects to this Home Assistant by itself, at `http://homeassistant.local:8123`. This address is fixed and can't be changed.\n\nBefore it can connect:\n1. In the Planetpod app, go to **Instellingen → Batterijmodus → Open → Home Assistant**, and press **Verbinden** on **Home Assistant Lokaal**.\n2. Home Assistant must be reachable at `http://homeassistant.local:8123` from the network your Planetpod is on. This works by default with Home Assistant OS.\n\n⏳ **Waiting for your Planetpod…** This usually takes about 10 seconds after both are ready. Press **Submit** to check again.\n\nStill waiting? See [Connection troubleshooting](https://github.com/Planetpod/home-assistant-planetpod#connection-troubleshooting).",
+        "data": {}
+      },
       "reconfigure": {
         "title": "Reconfigure Planetpod",
         "description": "Update your Planetpod API key.",
@@ -19,6 +39,14 @@
         },
         "data_description": {
           "api_key": "Bearer token starting with pp_"
+        }
+      },
+      "reconfigure_local": {
+        "title": "Reconfigure Planetpod",
+        "description": "Which grid meter reading should Balance mode use?",
+        "data": {
+          "g1_source": "G1 source",
+          "g1_ha_entity_id": "Home Assistant sensor"
         }
       },
       "reauth_confirm": {
@@ -38,7 +66,8 @@
       "grid_not_found": "No grid found for this API key.",
       "no_data_yet": "Planetpod API is reachable, but no pod data is available yet for this grid. Try again shortly.",
       "invalid_response": "Planetpod API returned an unexpected response format.",
-      "unknown": "Unexpected error. Check the logs for details."
+      "unknown": "Unexpected error. Check the logs for details.",
+      "g1_entity_required": "Choose a sensor, or switch back to \"Pod-reported\"."
     },
     "abort": {
       "already_configured": "This Planetpod grid is already configured.",
@@ -47,6 +76,17 @@
     }
   },
   "entity": {
+    "select": {
+      "planetpod_mode": {
+        "name": "Mode",
+        "state": {
+          "balance": "Balance",
+          "speed": "Speed",
+          "standby": "Standby",
+          "planning": "Planning"
+        }
+      }
+    },
     "sensor": {
       "soc_pct": {
         "name": "State of Charge"
@@ -76,7 +116,25 @@
         }
       },
       "pod_mode": {
-        "name": "Pod Mode"
+        "name": "Pod Mode",
+        "state": {
+          "speed": "Normal",
+          "balance": "Balance",
+          "standby": "Standby",
+          "shortStandby": "Short Standby",
+          "calibration": "Calibration",
+          "cell_health_protect": "Cell Health Protection",
+          "locked": "Locked",
+          "developer": "Developer",
+          "factorycheck": "Factory Check",
+          "cash": "Cash",
+          "solar": "Solar",
+          "solarSmart": "Solar Smart",
+          "solarSmartSpeed": "Solar Smart (Speed)",
+          "solarSmartBalance": "Solar Smart (Balance)",
+          "solarPure": "Solar Pure",
+          "unknown": "Unknown"
+        }
       },
       "deployed_power_kw": {
         "name": "Deployed Power"
@@ -128,6 +186,12 @@
       "soc_lower_limit_pct": {
         "name": "SoC Lower Limit"
       }
+    }
+  },
+  "issues": {
+    "mushroom_missing": {
+      "title": "Install Mushroom to get the Planetpod dashboard",
+      "description": "The Planetpod dashboard uses Mushroom cards, which are not installed. Install Mushroom via HACS (Frontend) and the dashboard is created automatically; restart Home Assistant once to see it in the sidebar. Your Planetpod devices and entities work without it."
     }
   }
 }

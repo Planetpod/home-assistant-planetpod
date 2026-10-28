@@ -1,0 +1,1388 @@
+"""End-to-end regression tests for local-mode entity state writes.
+
+These go through a real config entry + sensor platform setup (unlike
+test_coordinator.py's unit-level tests) specifically because the bug this
+guards against -- an invalid ENUM sensor state -- only surfaces when an
+entity actually writes its state to hass, not from inspecting the
+coordinator's data dict alone.
+"""
+from __future__ import annotations
+
+import json
+from datetime import datetime, timedelta, timezone
+
+import pytest
+from homeassistant.const import EntityCategory, STATE_UNAVAILABLE
+from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
+from homeassistant.util import dt as dt_util
+from pytest_homeassistant_custom_component.common import MockConfigEntry, async_fire_time_changed
+
+from homeassistant import config_entries
+
+from custom_components.planetpod.const import (
+    CONF_CONNECTION_TYPE,
+    CONF_G1_SOURCE,
+    CONNECTION_TYPE_LOCAL,
+    DOMAIN,
+    G1_SOURCE_POD,
+    HTTP_VIEW_URL,
+    ONLINE_TIMEOUT_SECONDS,
+    PENDING_PODS_KEY,
+)
+
+MOCK_LOCAL_PAYLOAD = {
+    "timestamp": "2026-07-14T12:00:00.000Z",
+    "systemInfo": {"podSerialNumber": "PP-001", "firmwareVersion": "1.1.8"},
+    "g1Data": {"powerDelivered": 0, "powerReturned": 1.2},
+    "bmsData": {"socPct": 62, "soh": 98, "cycleCount": 143, "avgTempC": 27.4},
+    "podStatus": {"podChargingStatus": "idle", "podMode": "balance"},
+}
+
+# A second, independent pod on the same grid/install -- distinct serial and
+# distinct telemetry, used to exercise the "one grid, multiple pods" case
+# that (unlike the cloud integration) had zero test coverage before.
+MOCK_LOCAL_PAYLOAD_2 = {
+    "timestamp": "2026-07-14T12:00:05.000Z",
+    "systemInfo": {"podSerialNumber": "PP-002", "firmwareVersion": "1.1.8"},
+    "g1Data": {"powerDelivered": 0, "powerReturned": 1.2},
+    "bmsData": {"socPct": 40, "soh": 95, "cycleCount": 88, "avgTempC": 25.1},
+    "podStatus": {"podChargingStatus": "charge", "podMode": "balance"},
+}
+
+
+async def test_local_pod_post_does_not_raise_on_entity_state_write(hass: HomeAssistant):
+    """Regression test: a local pod's POST must not crash entity state
+    writes. Previously, coordinator_local set status.app_mode to the
+    Balance/Speed mode value, which collides with the app_mode sensor's
+    fixed ENUM options (cash/solar/solarSmart/solarPure) and raised
+    ValueError deep inside async_set_updated_data's listener callbacks --
+    escaping mid-request and causing GET/POST handlers to hang instead of
+    responding.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Planetpod",
+        data={CONF_CONNECTION_TYPE: CONNECTION_TYPE_LOCAL},
+        options={},
+        unique_id="planetpod_local",
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+
+    # This must not raise -- it did, before the fix.
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.planetpod_pp_001_app_mode")
+    assert state is not None
+    assert state.state == "unknown"
+
+
+async def test_reconfigure_local_entry_shows_g1_step_not_api_key_form(
+    hass: HomeAssistant,
+):
+    """Regression test: "Reconfigure" on a local-mode entry must not show
+    the cloud API-key form -- it has no API key to reconfigure.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Planetpod",
+        data={CONF_CONNECTION_TYPE: CONNECTION_TYPE_LOCAL},
+        options={},
+        unique_id="planetpod_local",
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": "reconfigure", "entry_id": entry.entry_id},
+    )
+
+    # Must always show the local G1-source form (never the cloud API-key
+    # form), even with no auto-detected candidate sensor in this test hass --
+    # the user can still pick any sensor manually via the entity selector.
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "reconfigure_local"
+
+
+async def test_local_setup_completes_via_g1_form_with_no_candidate_detected(
+    hass: HomeAssistant,
+):
+    """Regression test: the G1-source step must always show a real form and
+    let setup complete (default to pod-reported), even when no P1/DSMR-like
+    sensor is auto-detected -- it must not silently skip/auto-decide.
+    """
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_CONNECTION_TYPE: CONNECTION_TYPE_LOCAL}
+    )
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "local_connect"
+
+    hass.data.setdefault(DOMAIN, {}).setdefault(PENDING_PODS_KEY, {})["PP-001"] = MOCK_LOCAL_PAYLOAD
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "local_g1"
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_G1_SOURCE: G1_SOURCE_POD}
+    )
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["options"][CONF_G1_SOURCE] == G1_SOURCE_POD
+
+
+async def test_command_button_sets_one_shot_flag_on_next_get(hass: HomeAssistant):
+    """A command button press must appear exactly once in the next GET
+    response, then clear -- it's a one-shot action, not persistent state.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Planetpod",
+        data={CONF_CONNECTION_TYPE: CONNECTION_TYPE_LOCAL},
+        options={},
+        unique_id="planetpod_local",
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+
+    coordinator.trigger_command("PP-001", "reboot")
+
+    first = coordinator.get_response_for("PP-001")
+    assert first["Reboot"] is True
+
+    # Reboot is always present in the real contract (default false), not
+    # omitted -- it must revert to False on the next GET, not disappear.
+    second = coordinator.get_response_for("PP-001")
+    assert second["Reboot"] is False
+
+
+async def test_balance_source_sensor_reflects_g1_config(hass: HomeAssistant):
+    """The Balance Source sensor (and the shared SoC/Mode controls) must be
+    attached to the pod's own device, and reflect pod-reported vs. an HA
+    sensor correctly.
+    """
+    hass.states.async_set("sensor.my_p1_meter", "1.5", {"friendly_name": "My P1 Meter"})
+
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Planetpod",
+        data={CONF_CONNECTION_TYPE: CONNECTION_TYPE_LOCAL},
+        options={},
+        unique_id="planetpod_local",
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.planetpod_pp_001_p1_balance_source")
+    assert state is not None
+    assert state.state == "Pod-reported"
+
+    hass.config_entries.async_update_entry(
+        entry,
+        options={
+            "g1_source": "ha_sensor",
+            "g1_ha_entity_id": "sensor.my_p1_meter",
+        },
+    )
+    coordinator.async_options_updated()
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.planetpod_pp_001_p1_balance_source")
+    assert state.state == "My P1 Meter"
+
+    delivered = hass.states.get("sensor.planetpod_pp_001_p1_power_delivered")
+    assert float(delivered.state) == 1.5
+
+    # SoC/Mode controls must be on the pod's own device, not a separate one.
+    number_state = hass.states.get("number.planetpod_pp_001_soc_upper_limit")
+    select_state = hass.states.get("select.planetpod_pp_001_mode")
+    assert number_state is not None
+    assert select_state is not None
+
+
+async def test_command_buttons_are_config_category(hass: HomeAssistant):
+    """Regression test: command buttons must be entity_category=CONFIG so
+    they land in the device page's "Configuration" section, separate from
+    Mode/SoC limits in "Controls" -- otherwise HA alphabetizes everything
+    together, mixing "Calibration" in between "Mode" and the SoC sliders.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Planetpod",
+        data={CONF_CONNECTION_TYPE: CONNECTION_TYPE_LOCAL},
+        options={},
+        unique_id="planetpod_local",
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    registry = er.async_get(hass)
+
+    for entity_id in (
+        "button.planetpod_pp_001_reboot",
+        "button.planetpod_pp_001_calibration",
+        "button.planetpod_pp_001_turn_off_bms",
+    ):
+        entry_reg = registry.async_get(entity_id)
+        assert entry_reg is not None, f"{entity_id} not found"
+        assert entry_reg.entity_category == EntityCategory.CONFIG
+
+    # Unlock SCU/BMS Update/Debug are deliberately not exposed as HA buttons.
+    for entity_id in (
+        "button.planetpod_pp_001_unlock_scu",
+        "button.planetpod_pp_001_bms_update",
+        "button.planetpod_pp_001_debug",
+    ):
+        assert registry.async_get(entity_id) is None, f"{entity_id} should not exist"
+
+    # Mode/SoC must stay in the primary Controls section (no category).
+    for entity_id in (
+        "select.planetpod_pp_001_mode",
+        "number.planetpod_pp_001_soc_upper_limit",
+        "number.planetpod_pp_001_soc_lower_limit",
+    ):
+        entry_reg = registry.async_get(entity_id)
+        assert entry_reg is not None, f"{entity_id} not found"
+        assert entry_reg.entity_category is None
+
+
+async def test_stale_removed_buttons_are_deleted_from_registry_not_just_unavailable(
+    hass: HomeAssistant,
+):
+    """HA does not delete an entity from the registry just because the
+    integration stops creating it -- it's left behind (usually shown as
+    unavailable/disabled, not gone). Simulate a leftover Unlock SCU button
+    from before it was removed from BUTTON_DESCRIPTIONS, and confirm
+    async_setup_entry actually removes it from the registry, not just lets
+    it sit there disabled.
+    """
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Planetpod",
+        data={CONF_CONNECTION_TYPE: CONNECTION_TYPE_LOCAL},
+        options={},
+        unique_id="planetpod_local",
+    )
+    entry.add_to_hass(hass)
+
+    registry = er.async_get(hass)
+    stale = registry.async_get_or_create(
+        "button",
+        DOMAIN,
+        f"{entry.entry_id}_PP-001_unlock_scu",
+        config_entry=entry,
+    )
+    assert registry.async_get(stale.entity_id) is not None
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert registry.async_get(stale.entity_id) is None
+
+
+async def _setup_local_entry(hass: HomeAssistant, options: dict | None = None) -> MockConfigEntry:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Planetpod",
+        data={CONF_CONNECTION_TYPE: CONNECTION_TYPE_LOCAL},
+        options=options or {},
+        unique_id="planetpod_local",
+    )
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    return entry
+
+
+async def test_speed_setpoint_drives_get_response(hass: HomeAssistant):
+    """Setting the Speed Setpoint number entity must actually flow into the
+    next GET response once Mode is set to Speed -- this is the core bug fix:
+    speed_setpoint_kw was never wired into compute_get_response() before.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+    coordinator.set_mode("PP-001", "speed")
+
+    coordinator.set_speed_setpoint("PP-001", 2.5)
+
+    response = coordinator.get_response_for("PP-001")
+    assert response["Modus"] == "solarSmart"
+    assert response["solarSmart"] == {"subMode": "speed", "setpoint_kW": 2.5}
+
+    state = hass.states.get("sensor.planetpod_pp_001_speed_setpoint_status")
+    assert state.state == "Active"
+
+
+async def test_speed_setpoint_expires_to_idle(hass: HomeAssistant):
+    """A Speed Setpoint that hasn't been refreshed within the timeout window
+    must revert to 0/idle rather than keep applying a stale value.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+    coordinator.set_mode("PP-001", "speed")
+
+    coordinator.set_speed_setpoint("PP-001", 1.0)
+    coordinator._speed_setpoint_expires_at["PP-001"] = datetime.now(timezone.utc) - timedelta(
+        minutes=1
+    )
+    coordinator._rebuild()
+    await hass.async_block_till_done()
+
+    response = coordinator.get_response_for("PP-001")
+    assert response["solarSmart"] == {"subMode": "speed", "setpoint_kW": 0.0}
+
+    state = hass.states.get("sensor.planetpod_pp_001_speed_setpoint_status")
+    assert state.state == "Expired (reverted to idle)"
+
+
+async def test_speed_setpoint_duration_changes_expiry_window(hass: HomeAssistant):
+    """Setting a shorter Speed Setpoint Duration must apply the new window
+    the next time a setpoint is set, not force an immediate expiry.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+    coordinator.set_mode("PP-001", "speed")
+
+    coordinator.set_speed_setpoint_duration("PP-001", 5)
+    assert coordinator.speed_setpoint_duration_min("PP-001") == 5
+
+    coordinator.set_speed_setpoint("PP-001", 1.5)
+    assert coordinator.effective_speed_setpoint_kw("PP-001") == 1.5
+
+    coordinator._speed_setpoint_expires_at["PP-001"] = datetime.now(timezone.utc) - timedelta(
+        seconds=1
+    )
+    assert coordinator.effective_speed_setpoint_kw("PP-001") == 0.0
+
+
+async def test_active_speed_setpoint_survives_reload(hass: HomeAssistant):
+    """An active Speed Setpoint command must survive a coordinator reload
+    (HA restart, integration update/reinstall) with its remaining time
+    intact -- not silently revert to idle just because a fresh coordinator
+    instance was created.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+    coordinator.set_mode("PP-001", "speed")
+
+    coordinator.set_speed_setpoint_duration("PP-001", 240)
+    coordinator.set_speed_setpoint("PP-001", 2.0)
+    assert coordinator.effective_speed_setpoint_kw("PP-001") == 2.0
+
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    reloaded_coordinator = hass.data[DOMAIN][entry.entry_id]
+    assert reloaded_coordinator is not coordinator
+    assert reloaded_coordinator.speed_setpoint_active("PP-001") is True
+    assert reloaded_coordinator.effective_speed_setpoint_kw("PP-001") == 2.0
+
+
+async def test_pending_command_survives_reload_before_next_get(hass: HomeAssistant):
+    """A one-shot command (Reboot/Calibration/...) queued via a button press
+    must not be silently dropped if a reload happens before the pod's next
+    GET consumes it.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    coordinator.trigger_command("PP-001", "reboot")
+
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    reloaded_coordinator = hass.data[DOMAIN][entry.entry_id]
+    assert reloaded_coordinator is not coordinator
+    reloaded_coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    response = reloaded_coordinator.get_response_for("PP-001")
+    assert response["Reboot"] is True
+
+
+async def test_balance_source_sensor_shows_no_p1_error(hass: HomeAssistant):
+    """With Balance mode selected and no usable G1 reading (HA sensor
+    unavailable, no pod-reported G1 in the payload either), the P1 Balance
+    Source sensor must show a clear error instead of silently doing nothing.
+    """
+    entry = await _setup_local_entry(
+        hass,
+        options={
+            "g1_source": "ha_sensor",
+            "g1_ha_entity_id": "sensor.does_not_exist",
+        },
+    )
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    payload = {**MOCK_LOCAL_PAYLOAD, "g1Data": {"powerDelivered": None, "powerReturned": None}}
+    coordinator.ingest_post("PP-001", payload)
+    await hass.async_block_till_done()
+    coordinator.set_mode("PP-001", "balance")
+
+    response = coordinator.get_response_for("PP-001")
+    assert response["solarSmart"]["setpoint_kW"] == 0.0
+
+    state = hass.states.get("sensor.planetpod_pp_001_p1_balance_source")
+    assert state.state == "Can't balance: no P1 sensor"
+
+
+async def test_balance_mode_sends_net_zero_grid_target_not_the_p1_reading(
+    hass: HomeAssistant,
+):
+    """setpoint_kW is the grid target firmware steers to. Sending the live P1
+    reading (here -5.74 for 5.74 kW import) told the pod to export that much."""
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    payload = {**MOCK_LOCAL_PAYLOAD, "g1Data": {"powerDelivered": 5.74, "powerReturned": 0}}
+    coordinator.ingest_post("PP-001", payload)
+    await hass.async_block_till_done()
+    coordinator.set_mode("PP-001", "balance")
+
+    response = coordinator.get_response_for("PP-001")
+
+    assert response["solarSmart"] == {"subMode": "balance", "setpoint_kW": 0.0}
+
+
+async def test_soc_limit_sliders_have_5_to_100_bounds(hass: HomeAssistant):
+    """SoC Upper/Lower Limit sliders must never allow a value below 5% --
+    a battery-safety floor -- and must cap at 100%.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    for entity_id in (
+        "number.planetpod_pp_001_soc_upper_limit",
+        "number.planetpod_pp_001_soc_lower_limit",
+    ):
+        state = hass.states.get(entity_id)
+        assert state is not None, f"{entity_id} not found"
+        assert state.attributes["min"] == 5
+        assert state.attributes["max"] == 100
+
+
+async def test_speed_setpoint_unavailable_unless_mode_is_speed(hass: HomeAssistant):
+    """The Speed Setpoint number entity must be unavailable (grayed out)
+    whenever Mode isn't Speed -- it has no effect in Balance mode, so it
+    shouldn't look editable/active on the device page.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+    coordinator.set_mode("PP-001", "balance")
+    await hass.async_block_till_done()
+
+    state = hass.states.get("number.planetpod_pp_001_speed_setpoint")
+    assert state.state == "unavailable"
+
+    coordinator.set_mode("PP-001", "speed")
+    await hass.async_block_till_done()
+
+    state = hass.states.get("number.planetpod_pp_001_speed_setpoint")
+    assert state.state != "unavailable"
+
+
+async def test_editing_speed_setpoint_number_does_not_send_until_button_pressed(
+    hass: HomeAssistant,
+):
+    """Editing the Speed Setpoint/Duration number entities must only stage
+    values -- nothing is actually sent to the pod until "Send Speed Command"
+    is pressed. This is what avoids the old order-dependency footgun where
+    changing Duration after Setpoint silently used the previous duration.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+    coordinator.set_mode("PP-001", "speed")
+
+    coordinator.stage_speed_setpoint("PP-001", 2.0)
+    coordinator.set_speed_setpoint_duration("PP-001", 10)
+
+    # Staged only -- not yet active/sent.
+    assert coordinator.effective_speed_setpoint_kw("PP-001") == 0.0
+    assert coordinator.speed_setpoint_active("PP-001") is False
+
+    await hass.services.async_call(
+        "button",
+        "press",
+        {"entity_id": "button.planetpod_pp_001_send_speed_command"},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    assert coordinator.speed_setpoint_active("PP-001") is True
+    response = coordinator.get_response_for("PP-001")
+    assert response["solarSmart"] == {"subMode": "speed", "setpoint_kW": 2.0}
+
+
+async def test_staging_new_setpoint_while_active_does_not_leak_until_send(
+    hass: HomeAssistant,
+):
+    """Staging a new Speed Setpoint while a previous command is still
+    active must NOT change what's applied until "Send Speed Command" is
+    pressed again -- effective_speed_setpoint_kw must reflect the value that
+    was active at the last send, not whatever is currently staged.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+    coordinator.set_mode("PP-001", "speed")
+
+    coordinator.set_speed_setpoint("PP-001", 2.0)
+    assert coordinator.speed_setpoint_active("PP-001") is True
+    assert coordinator.effective_speed_setpoint_kw("PP-001") == 2.0
+
+    # Stage a new value only -- do NOT press "Send Speed Command" again.
+    coordinator.stage_speed_setpoint("PP-001", -1.0)
+
+    # Still active from the first send, and must still apply 2.0, not -1.0.
+    assert coordinator.speed_setpoint_active("PP-001") is True
+    assert coordinator.effective_speed_setpoint_kw("PP-001") == 2.0
+    response = coordinator.get_response_for("PP-001")
+    assert response["solarSmart"] == {"subMode": "speed", "setpoint_kW": 2.0}
+
+    # Now actually send -- the staged -1.0 takes over, and immediately.
+    coordinator.send_speed_command("PP-001")
+    assert coordinator.effective_speed_setpoint_kw("PP-001") == -1.0
+
+
+async def test_sending_new_setpoint_while_active_overwrites_not_queues(
+    hass: HomeAssistant,
+):
+    """A second "send" while a previous command is still active must fully
+    replace it -- no queueing of the old command's remaining duration.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+    coordinator.set_mode("PP-001", "speed")
+
+    coordinator.set_speed_setpoint_duration("PP-001", 5)
+    coordinator.set_speed_setpoint("PP-001", 2.0)
+    first_expiry = coordinator._speed_setpoint_expires_at["PP-001"]
+
+    coordinator.set_speed_setpoint_duration("PP-001", 10)
+    coordinator.set_speed_setpoint("PP-001", -1.0)
+
+    assert coordinator.effective_speed_setpoint_kw("PP-001") == -1.0
+    assert coordinator._speed_setpoint_expires_at["PP-001"] != first_expiry
+    assert coordinator._speed_setpoint_expires_at["PP-001"] > first_expiry
+
+
+async def test_send_speed_command_button_unavailable_unless_mode_is_speed(
+    hass: HomeAssistant,
+):
+    """The Send Speed Command button must be unavailable outside Speed mode,
+    same as the Setpoint/Duration number entities it applies.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+    coordinator.set_mode("PP-001", "balance")
+    await hass.async_block_till_done()
+
+    state = hass.states.get("button.planetpod_pp_001_send_speed_command")
+    assert state.state == "unavailable"
+
+    registry = er.async_get(hass)
+    entry_reg = registry.async_get("button.planetpod_pp_001_send_speed_command")
+    assert entry_reg is not None
+    assert entry_reg.entity_category is None
+
+
+async def test_last_post_received_sensor_exposes_raw_payload(hass: HomeAssistant):
+    """The Last POST Received sensor must expose a real timestamp state plus
+    the raw POST payload as an attribute, so the last message from a pod is
+    inspectable from Developer Tools > States without digging through logs.
+
+    The attribute is pretty-printed JSON (not a raw dict) so it's actually
+    readable in the more-info dialog/Developer Tools, not one long repr()
+    line -- assert on the parsed content, not string equality.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.planetpod_pp_001_last_post_received")
+    assert state is not None
+    assert state.state != "unknown"
+    assert json.loads(state.attributes["raw_payload"]) == MOCK_LOCAL_PAYLOAD
+
+    registry = er.async_get(hass)
+    entry_reg = registry.async_get("sensor.planetpod_pp_001_last_post_received")
+    assert entry_reg is not None
+    assert entry_reg.entity_category == EntityCategory.DIAGNOSTIC
+
+
+async def test_last_error_sensor_reflects_errorlogs_from_post(hass: HomeAssistant):
+    """The Last Error sensor must surface the raw POST's errorLogs (SCU/BMS
+    fault data), which the cloud REST API never exposes -- this is
+    local-mode-only visibility into battery faults.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+    state = hass.states.get("sensor.planetpod_pp_001_last_error")
+    assert state.state == "None"
+
+    payload_with_error = {
+        **MOCK_LOCAL_PAYLOAD,
+        "errorLogs": [
+            {
+                "timestamp": "2026-07-16T13:49:26.000Z",
+                "errorCode": "E042",
+                "errorType": "bms",
+                "description": "Cell overvoltage detected",
+                "severity": 2,
+                "errorGroup": "battery",
+                "startEnd": 1,
+            }
+        ],
+    }
+    coordinator.ingest_post("PP-001", payload_with_error)
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.planetpod_pp_001_last_error")
+    assert state.state == "[Minor warning] E042 (bms): Cell overvoltage detected"
+    assert state.attributes["error_logs"][0]["errorCode"] == "E042"
+    assert state.attributes["highest_severity"] == "Minor warning"
+
+    registry = er.async_get(hass)
+    entry_reg = registry.async_get("sensor.planetpod_pp_001_last_error")
+    assert entry_reg is not None
+    assert entry_reg.entity_category == EntityCategory.DIAGNOSTIC
+
+
+async def test_last_error_sensor_skips_empty_fields_when_concatenating(
+    hass: HomeAssistant,
+):
+    """Some firmware ErrorInfoList entries (e.g. E405/lost cloud connection)
+    ship with an empty `description` (and often an empty `errorGroup` too)
+    -- the sensor must skip whichever fields are empty rather than leaving
+    stray separators or going blank.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+
+    payload_with_error = {
+        **MOCK_LOCAL_PAYLOAD,
+        "errorLogs": [
+            {
+                "timestamp": "2026-07-16T13:49:26.000Z",
+                "errorCode": "E405",
+                "errorType": "Lost cloud connection",
+                "description": "",
+                "severity": 3,
+                "errorGroup": "",
+                "startEnd": 1,
+            }
+        ],
+    }
+    coordinator.ingest_post("PP-001", payload_with_error)
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.planetpod_pp_001_last_error")
+    assert state.state == "[Minor error] E405 (Lost cloud connection)"
+
+
+async def test_last_error_sensor_shows_all_errors_newest_first(
+    hass: HomeAssistant,
+):
+    """One POST can legitimately carry more than one error at once -- the
+    sensor must show all of them, sorted newest first by timestamp (not
+    array position: firmware serializes errorLogs from a
+    std::unordered_map, so JSON array order is NOT guaranteed to be
+    chronological -- confirmed with a real payload where an older E405 was
+    last and a newer E402 was first).
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+
+    payload_with_errors = {
+        **MOCK_LOCAL_PAYLOAD,
+        "errorLogs": [
+            {
+                "severity": 1,
+                "startEnd": 0,
+                "errorCode": "E402",
+                "errorType": "Reboot",
+                "timestamp": "2026-08-19 08:06:27",
+                "errorGroup": "warning",
+                "description": "Had a reboot, reason: 05",
+            },
+            {
+                "severity": 3,
+                "startEnd": 1,
+                "errorCode": "E405",
+                "errorType": "Lost cloud connection",
+                "timestamp": "2026-08-19 08:06:22",
+                "errorGroup": "",
+                "description": "",
+            },
+        ],
+    }
+    coordinator.ingest_post("PP-001", payload_with_errors)
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.planetpod_pp_001_last_error")
+    assert state.state == (
+        "[Info] E402 (Reboot): Had a reboot, reason: 05 (resolved); "
+        "[Minor error] E405 (Lost cloud connection)"
+    )
+
+
+async def test_last_error_sensor_truncates_to_ha_state_limit(hass: HomeAssistant):
+    """Six long errors exceed HA's 255-char state limit; the state is trimmed
+    while the full list stays in the attributes."""
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+
+    errors = [
+        {
+            "timestamp": f"2026-10-07 10:0{i}:00",
+            "errorCode": f"E04{i}",
+            "errorType": "BMS Alarm",
+            "description": "Critical battery failure level 03 (alarm) detected during operation",
+            "severity": 5,
+            "errorGroup": "",
+            "startEnd": 1,
+        }
+        for i in range(6)
+    ]
+    coordinator.ingest_post("PP-001", {**MOCK_LOCAL_PAYLOAD, "errorLogs": errors})
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.planetpod_pp_001_last_error")
+    assert len(state.state) == 255
+    assert state.state.endswith("…")
+    assert len(state.attributes["error_logs"]) == 6
+    assert state.attributes["highest_severity"] == "Fatal"
+
+
+async def test_always_present_command_fields_default_false(hass: HomeAssistant):
+    """Reboot/Toggle_calibration/TurnOffBMS/UnlockBMS must always be present
+    (default False) in every GET response, matching the real cloud contract --
+    not omitted like Unlock/Debug_on/bmsUpdate.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    response = coordinator.get_response_for("PP-001")
+    assert response["Reboot"] is False
+    assert response["Toggle_calibration"] is False
+    assert response["TurnOffBMS"] is False
+    assert response["UnlockBMS"] is False
+    assert "Unlock" not in response
+    assert "Debug_on" not in response
+    assert "bmsUpdate" not in response
+
+
+async def test_conditional_command_fields_omitted_unless_true(hass: HomeAssistant):
+    """Unlock/Debug_on/bmsUpdate must be OMITTED when not triggered, and
+    present as True (not False) exactly once, matching the real cloud
+    contract's conditional-spread behavior.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    coordinator.trigger_command("PP-001", "debug_on")
+    coordinator.trigger_command("PP-001", "unlock_bms")
+    coordinator.trigger_command("PP-001", "bms_update")
+
+    first = coordinator.get_response_for("PP-001")
+    assert first["Debug_on"] is True
+    assert first["bmsUpdate"] is True
+    # unlock_bms is an always-present field, so it reverts to False, not omitted.
+    assert first["UnlockBMS"] is True
+
+    second = coordinator.get_response_for("PP-001")
+    assert "Debug_on" not in second
+    assert "bmsUpdate" not in second
+    assert second["UnlockBMS"] is False
+
+
+async def test_get_response_includes_soc_limits_and_same_group(hass: HomeAssistant):
+    """Min_SOC/Max_SOC/sameGroup are confirmed control-affecting on firmware
+    (persisted into its own SOC-limit storage and NVS group setting), not
+    informational -- omitting them means the SoC Upper/Lower Limit entities
+    would silently have no effect on a real pod.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+    coordinator.set_soc_upper_limit("PP-001", 90)
+    coordinator.set_soc_lower_limit("PP-001", 15)
+
+    response = coordinator.get_response_for("PP-001")
+    assert response["Max_SOC"] == 90
+    assert response["Min_SOC"] == 15
+    # Mode/SoC/Speed/Planning are independent per pod now, so pods must NOT
+    # be firmware-mesh-grouped (see coordinator_local.py's get_response_for).
+    assert response["sameGroup"] is False
+
+
+async def test_soh_and_cycle_count_survive_posts_that_omit_them(hass: HomeAssistant):
+    """Firmware only includes bmsData.soh/cycleCount/cycleBufferMah in a POST
+    when the value changed since the last send (delta-throttled) -- a naive
+    full-overwrite of the raw payload would flicker State of Health/Total
+    Cycles to unknown on every POST that doesn't repeat them.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)  # has soh=98, cycleCount=143
+    await hass.async_block_till_done()
+
+    payload_without_deltas = {
+        **MOCK_LOCAL_PAYLOAD,
+        "bmsData": {"socPct": 61, "avgTempC": 27.1},  # no soh/cycleCount this time
+    }
+    coordinator.ingest_post("PP-001", payload_without_deltas)
+    await hass.async_block_till_done()
+
+    soh_state = hass.states.get("sensor.planetpod_pp_001_state_of_health")
+    cycles_state = hass.states.get("sensor.planetpod_pp_001_total_cycles")
+    assert soh_state.state == "98"
+    assert cycles_state.state == "143"
+
+    # The raw diagnostic sensor must stay genuinely raw (no backfilled values).
+    last_post_state = hass.states.get("sensor.planetpod_pp_001_last_post_received")
+    raw_payload = json.loads(last_post_state.attributes["raw_payload"])
+    assert "soh" not in raw_payload["bmsData"]
+
+
+async def test_standby_mode_forces_zero_setpoint(hass: HomeAssistant):
+    """Standby mode must force a persistent 0kW/idle request every GET --
+    sent as subMode="speed"/setpoint_kW=0.0 since firmware has no wire-level
+    "standby" subMode (anything other than exactly "balance" falls through
+    to its speed branch) -- confirmed this matches how the real cloud's own
+    standby feature works too (just holding the setpoint at 0).
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+    coordinator.set_mode("PP-001", "speed")
+
+    coordinator.set_speed_setpoint("PP-001", 2.5)
+    response = coordinator.get_response_for("PP-001")
+    assert response["solarSmart"]["setpoint_kW"] == 2.5
+
+    coordinator.set_mode("PP-001", "standby")
+    await hass.async_block_till_done()
+
+    # Standby must override even a still-active, non-expired Speed Setpoint.
+    response = coordinator.get_response_for("PP-001")
+    assert response["Modus"] == "solarSmart"
+    assert response["solarSmart"] == {"subMode": "speed", "setpoint_kW": 0.0}
+
+
+async def test_soc_lower_limit_cannot_exceed_upper_limit(hass: HomeAssistant):
+    """Setting SoC Lower Limit above the current SoC Upper Limit must be
+    rejected -- a lower limit higher than the upper limit is nonsensical.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+    coordinator.set_soc_upper_limit("PP-001", 85)
+    coordinator.set_soc_lower_limit("PP-001", 20)
+
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call(
+            "number",
+            "set_value",
+            {"entity_id": "number.planetpod_pp_001_soc_lower_limit", "value": 90},
+            blocking=True,
+        )
+    await hass.async_block_till_done()
+
+    # Rejected -- the stored value must be unchanged.
+    assert coordinator.soc_lower_limit_pct("PP-001") == 20
+
+
+async def test_soc_upper_limit_cannot_go_below_lower_limit(hass: HomeAssistant):
+    """Setting SoC Upper Limit below the current SoC Lower Limit must be
+    rejected -- an upper limit lower than the lower limit is nonsensical.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+    coordinator.set_soc_upper_limit("PP-001", 85)
+    coordinator.set_soc_lower_limit("PP-001", 20)
+
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call(
+            "number",
+            "set_value",
+            {"entity_id": "number.planetpod_pp_001_soc_upper_limit", "value": 10},
+            blocking=True,
+        )
+    await hass.async_block_till_done()
+
+    assert coordinator.soc_upper_limit_pct("PP-001") == 85
+
+
+async def test_soc_limits_can_be_set_equal(hass: HomeAssistant):
+    """Lower limit == upper limit is a degenerate but valid configuration
+    (locks the battery at a fixed SoC) -- must not be rejected.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+    coordinator.set_soc_upper_limit("PP-001", 85)
+    coordinator.set_soc_lower_limit("PP-001", 20)
+
+    await hass.services.async_call(
+        "number",
+        "set_value",
+        {"entity_id": "number.planetpod_pp_001_soc_lower_limit", "value": 85},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    assert coordinator.soc_lower_limit_pct("PP-001") == 85
+    assert coordinator.soc_upper_limit_pct("PP-001") == 85
+
+
+async def test_last_get_sent_sensor_exposes_raw_response(hass: HomeAssistant):
+    """Mirrors "Last POST Received" for the other direction -- the Last GET
+    Sent sensor must expose a real timestamp state plus the actual GET
+    response HA sent back to the pod, as pretty-printed JSON, so the wire
+    contract is inspectable without digging through logs.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+    coordinator.set_soc_upper_limit("PP-001", 85)
+    coordinator.set_soc_lower_limit("PP-001", 20)
+
+    state = hass.states.get("sensor.planetpod_pp_001_last_get_sent")
+    assert state is not None
+    assert state.state == "unknown"  # no GET served yet
+
+    response = coordinator.get_response_for("PP-001")
+    await hass.async_block_till_done()
+
+    state = hass.states.get("sensor.planetpod_pp_001_last_get_sent")
+    assert state.state != "unknown"
+    raw_response = json.loads(state.attributes["raw_response"])
+    assert raw_response == response
+    assert raw_response["Min_SOC"] == 20
+    assert raw_response["Max_SOC"] == 85
+
+
+async def test_planning_mode_sends_current_hour_schedule_value(hass: HomeAssistant):
+    """Planning mode must read the current wall-clock hour's entry from the
+    24-hour schedule and send it as a held speed setpoint (subMode="speed",
+    same wire shape as manual Speed mode) -- the Planning dashboard card only
+    stages values into entry.options; nothing else applies them without this.
+    """
+    current_hour = dt_util.now().hour
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+    coordinator.set_mode("PP-001", "planning")
+    coordinator.set_planning_hour_kw("PP-001", current_hour, 1.7)
+
+    response = coordinator.get_response_for("PP-001")
+    assert response["solarSmart"] == {"subMode": "speed", "setpoint_kW": 1.7}
+
+
+async def test_planning_mode_defaults_to_zero_for_unset_hour(hass: HomeAssistant):
+    """An hour never staged via the Planning card must default to 0kW, not error."""
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+    coordinator.set_mode("PP-001", "planning")
+
+    assert coordinator.effective_planning_power_kw("PP-001") == 0.0
+    response = coordinator.get_response_for("PP-001")
+    assert response["solarSmart"] == {"subMode": "speed", "setpoint_kW": 0.0}
+
+
+async def test_online_recheck_flips_online_sensor_offline_with_no_new_traffic(
+    hass: HomeAssistant,
+):
+    """The periodic online recheck registered in
+    PlanetpodLocalCoordinator.__init__ (async_track_time_interval ->
+    _handle_online_recheck) must flip the Online sensor to "offline" once
+    ONLINE_TIMEOUT_SECONDS has elapsed since the pod's last POST -- even
+    with no further pod traffic. Nothing else would ever re-trigger that
+    recheck, since the coordinator is otherwise push-only, so without it
+    this would stay "online" forever once a pod actually goes quiet.
+
+    This fires the *actual* scheduled HA timer via async_fire_time_changed
+    (it locates and runs the real asyncio.TimerHandle async_track_time_interval
+    registered), rather than calling _handle_online_recheck directly, so it
+    also catches the timer never having been registered/unsubscribed, or
+    (as originally shipped) not being decorated @callback and silently
+    getting bounced to an executor thread instead of running on the event
+    loop. last_message_at is backdated using real wall-clock time (not
+    freezegun) so build_pod_status's own `datetime.now(timezone.utc)` --
+    which async_fire_time_changed's internal now-patching doesn't reach --
+    genuinely sees it as stale.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    assert hass.states.get("sensor.planetpod_pp_001_online").state == "online"
+
+    coordinator._last_message_at["PP-001"] = datetime.now(timezone.utc) - timedelta(
+        seconds=ONLINE_TIMEOUT_SECONDS + 30
+    )
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=ONLINE_TIMEOUT_SECONDS + 30))
+    await hass.async_block_till_done()
+
+    assert hass.states.get("sensor.planetpod_pp_001_online").state == "offline"
+
+
+async def test_data_sensors_go_unavailable_offline_but_diagnostics_stay(
+    hass: HomeAssistant,
+):
+    """Once a pod is offline, live-data sensors (e.g. Charge Status, SoC)
+    must go unavailable rather than keep reporting the last cached POST as
+    if it were current. The Online sensor and diagnostic sensors (raw
+    POST/GET, error log) must stay available -- they're exactly what you'd
+    check to see when/why a pod went offline.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    coordinator._last_message_at["PP-001"] = datetime.now(timezone.utc) - timedelta(
+        seconds=ONLINE_TIMEOUT_SECONDS + 30
+    )
+    coordinator._rebuild()
+    await hass.async_block_till_done()
+
+    assert hass.states.get("sensor.planetpod_pp_001_charge_status").state == STATE_UNAVAILABLE
+    assert hass.states.get("sensor.planetpod_pp_001_state_of_charge").state == STATE_UNAVAILABLE
+
+    assert hass.states.get("sensor.planetpod_pp_001_online").state == "offline"
+    assert hass.states.get("sensor.planetpod_pp_001_last_error").state != STATE_UNAVAILABLE
+    assert hass.states.get("sensor.planetpod_pp_001_last_post_received").state != STATE_UNAVAILABLE
+
+
+# --- Multi-pod grid coverage --------------------------------------------
+#
+# One local-mode config entry is one grid; a grid can hold more than one
+# physical pod (unlike a second *grid*, which local mode structurally
+# cannot represent -- see config_flow.py's hardcoded "planetpod_local"
+# unique_id). Every test above this point used a single pod ("PP-001");
+# these guard the "one grid, N pods" path, which had no coverage at all
+# before -- entity creation, per-pod telemetry, grid-wide shared settings,
+# and the real HTTP GET/POST routing in api_local.py.
+
+
+async def test_two_pods_in_one_grid_get_independent_entities_and_telemetry(
+    hass: HomeAssistant,
+):
+    """Two distinct pod serials POSTing to the same grid/config entry must
+    each get their own entities, reporting their own telemetry -- not share
+    or overwrite each other's state.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    coordinator.ingest_post("PP-002", MOCK_LOCAL_PAYLOAD_2)
+    await hass.async_block_till_done()
+
+    assert coordinator.known_serials() == {"PP-001", "PP-002"}
+
+    assert hass.states.get("sensor.planetpod_pp_001_charge_status").state == "idle"
+    assert hass.states.get("sensor.planetpod_pp_001_state_of_charge").state == "62"
+
+    assert hass.states.get("sensor.planetpod_pp_002_charge_status").state == "charge"
+    assert hass.states.get("sensor.planetpod_pp_002_state_of_charge").state == "40"
+
+
+async def test_mode_and_speed_command_are_independent_per_pod_in_the_grid(
+    hass: HomeAssistant,
+):
+    """Mode, SoC limits, Planning, and Speed Setpoint/Send are all per-pod
+    (see coordinator_local.py's _get_per_pod_option) -- changing any of them
+    via one pod's own entities must NEVER affect another pod in the same
+    grid. Regression test for a real production bug: pressing "Send Speed
+    Command" on one pod's card silently overwrote another pod's still-active
+    Speed command, because both cards wrote the exact same shared
+    entry.options value.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    coordinator.ingest_post("PP-002", MOCK_LOCAL_PAYLOAD_2)
+    await hass.async_block_till_done()
+
+    coordinator.set_mode("PP-001", "speed")
+    coordinator.set_mode("PP-002", "balance")
+    coordinator.set_speed_setpoint("PP-001", 1.8)
+
+    assert hass.states.get("select.planetpod_pp_001_mode").state == "speed"
+    assert hass.states.get("select.planetpod_pp_002_mode").state == "balance"
+
+    response_1 = coordinator.get_response_for("PP-001")
+    assert response_1["solarSmart"] == {"subMode": "speed", "setpoint_kW": 1.8}
+    # PP-002 never got a Speed command at all -- must not see PP-001's value.
+    assert coordinator.effective_speed_setpoint_kw("PP-002") == 0.0
+    assert coordinator.speed_setpoint_active("PP-002") is False
+
+    # Changing Mode from PP-002's own select entity must NOT affect PP-001.
+    coordinator.set_mode("PP-002", "standby")
+    await hass.async_block_till_done()
+
+    assert hass.states.get("select.planetpod_pp_001_mode").state == "speed"
+    assert hass.states.get("select.planetpod_pp_002_mode").state == "standby"
+
+    # A later Speed command sent from PP-002's own card must not touch
+    # PP-001's still-active one.
+    coordinator.set_mode("PP-002", "speed")
+    coordinator.set_speed_setpoint("PP-002", -1.0)
+
+    assert coordinator.effective_speed_setpoint_kw("PP-001") == 1.8
+    assert coordinator.effective_speed_setpoint_kw("PP-002") == -1.0
+
+
+async def test_http_view_routes_post_and_get_independently_per_serial(
+    hass: HomeAssistant, hass_client
+):
+    """The real /planetpod HTTP endpoint (not just the coordinator directly)
+    must route each pod's POST/GET by its own ?serial=, so two pods on one
+    grid never see or overwrite each other's telemetry/commands.
+    """
+    entry = await _setup_local_entry(hass)
+    client = await hass_client()
+
+    resp = await client.post(HTTP_VIEW_URL, json=MOCK_LOCAL_PAYLOAD)
+    assert resp.status == 200
+    resp = await client.post(HTTP_VIEW_URL, json=MOCK_LOCAL_PAYLOAD_2)
+    assert resp.status == 200
+    await hass.async_block_till_done()
+
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    assert coordinator.known_serials() == {"PP-001", "PP-002"}
+
+    resp = await client.get(f"{HTTP_VIEW_URL}?serial=PP-001")
+    assert resp.status == 200
+    resp = await client.get(f"{HTTP_VIEW_URL}?serial=PP-002")
+    assert resp.status == 200
+
+    resp = await client.get(f"{HTTP_VIEW_URL}?serial=UNKNOWN-SERIAL")
+    assert resp.status == 404
+
+
+async def test_http_view_get_without_serial_requires_disambiguation_with_two_pods(
+    hass: HomeAssistant, hass_client
+):
+    """With only one pod known, GET with no ?serial= may assume it -- but
+    with two pods on the grid, guessing would silently send one pod's
+    commands/setpoint to the other, so it must require ?serial= instead.
+    """
+    await _setup_local_entry(hass)
+    client = await hass_client()
+
+    resp = await client.post(HTTP_VIEW_URL, json=MOCK_LOCAL_PAYLOAD)
+    assert resp.status == 200
+    await hass.async_block_till_done()
+
+    # Only one pod known so far -- GET with no ?serial= is fine.
+    resp = await client.get(HTTP_VIEW_URL)
+    assert resp.status == 200
+
+    resp = await client.post(HTTP_VIEW_URL, json=MOCK_LOCAL_PAYLOAD_2)
+    assert resp.status == 200
+    await hass.async_block_till_done()
+
+    # Two pods known now -- HA can no longer guess which one this GET is for.
+    resp = await client.get(HTTP_VIEW_URL)
+    assert resp.status == 400
+
+
+async def test_send_speed_command_button_does_not_overwrite_another_pod(
+    hass: HomeAssistant,
+):
+    """Regression test for a real production report: pressing "Send Speed
+    Command" on one pod's dashboard card overwrote another pod's still-active
+    Speed command, because both cards' entities silently shared one
+    install-wide value. Goes through the actual button/number entities and
+    HA's button.press/number.set_value services (not the coordinator API
+    directly), since that's exactly the surface the bug was reported on.
+    """
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    coordinator.ingest_post("PP-002", MOCK_LOCAL_PAYLOAD_2)
+    await hass.async_block_till_done()
+
+    coordinator.set_mode("PP-001", "speed")
+    coordinator.set_mode("PP-002", "speed")
+
+    await hass.services.async_call(
+        "number",
+        "set_value",
+        {"entity_id": "number.planetpod_pp_001_speed_setpoint", "value": 2.0},
+        blocking=True,
+    )
+    await hass.services.async_call(
+        "button",
+        "press",
+        {"entity_id": "button.planetpod_pp_001_send_speed_command"},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    assert coordinator.effective_speed_setpoint_kw("PP-001") == 2.0
+    assert coordinator.effective_speed_setpoint_kw("PP-002") == 0.0
+    assert coordinator.speed_setpoint_active("PP-002") is False
+
+    # PP-002's own card stages and sends a completely different command.
+    await hass.services.async_call(
+        "number",
+        "set_value",
+        {"entity_id": "number.planetpod_pp_002_speed_setpoint", "value": -1.5},
+        blocking=True,
+    )
+    await hass.services.async_call(
+        "button",
+        "press",
+        {"entity_id": "button.planetpod_pp_002_send_speed_command"},
+        blocking=True,
+    )
+    await hass.async_block_till_done()
+
+    # PP-001's still-active command must be completely unaffected.
+    assert coordinator.effective_speed_setpoint_kw("PP-001") == 2.0
+    assert coordinator.speed_setpoint_active("PP-001") is True
+    assert coordinator.effective_speed_setpoint_kw("PP-002") == -1.5
+
+    response_1 = coordinator.get_response_for("PP-001")
+    response_2 = coordinator.get_response_for("PP-002")
+    assert response_1["solarSmart"] == {"subMode": "speed", "setpoint_kW": 2.0}
+    assert response_2["solarSmart"] == {"subMode": "speed", "setpoint_kW": -1.5}
+
+
+async def test_pre_upgrade_flat_option_is_inherited_not_reset_to_default(
+    hass: HomeAssistant,
+):
+    """Regression test for an upgrade-safety gap: installs from before Mode/
+    SoC/Speed/Planning became per-pod stored these as one flat value in
+    entry.options (e.g. {"mode": "speed"}), not {"mode": {serial: "speed"}}.
+    Reading that with the new per-pod code must inherit the existing flat
+    value, not silently reset a live pod's already-configured Mode/SoC limit
+    back to the hardcoded default just because it hasn't been touched since
+    upgrading.
+    """
+    entry = await _setup_local_entry(hass, options={"mode": "speed", "soc_upper_limit_pct": 92})
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    coordinator.ingest_post("PP-002", MOCK_LOCAL_PAYLOAD_2)
+    await hass.async_block_till_done()
+
+    # Neither pod has been individually touched yet -- both must inherit
+    # the pre-upgrade flat value, not DEFAULT_MODE/DEFAULT_SOC_UPPER_LIMIT.
+    assert coordinator.mode("PP-001") == "speed"
+    assert coordinator.mode("PP-002") == "speed"
+    assert coordinator.soc_upper_limit_pct("PP-001") == 92
+    assert coordinator.soc_upper_limit_pct("PP-002") == 92
+
+    # Now PP-001's Mode is changed explicitly, converting the option to a
+    # per-pod dict for the first time -- PP-002 (still untouched) must keep
+    # seeing the value it always had, not jump to the hardcoded default the
+    # instant the option becomes a dict.
+    coordinator.set_mode("PP-001", "balance")
+
+    assert coordinator.mode("PP-001") == "balance"
+    assert coordinator.mode("PP-002") == "speed"
+
+
+async def test_battery_net_energy_counts_a_constant_charge_power(hass: HomeAssistant, freezer):
+    """A steady charge (e.g. 1.6 kW during calibration) never changes the
+    Deployed Power state, so it fires no state_changed events -- the energy
+    sensor must still integrate it."""
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    payload = {
+        **MOCK_LOCAL_PAYLOAD,
+        "podStatus": {"podChargingStatus": "charge", "podMode": "calibration"},
+        "powerCalculationInfo": {"requestedAcPower": 1600, "podCalcDeployAcPowerWatt": 1600},
+    }
+
+    for _ in range(31):  # first POST + 30 more, 10 s apart = 300 s at 1.6 kW
+        coordinator.ingest_post("PP-001", payload)
+        await hass.async_block_till_done()
+        freezer.tick(10)
+
+    assert hass.states.get("sensor.planetpod_pp_001_deployed_power").state == "1.6"
+    energy = float(hass.states.get("sensor.planetpod_pp_001_battery_net_energy").state)
+    # Counting starts at the 2nd POST (the 1st creates the entities), so ~290 s.
+    assert energy == pytest.approx(1.6 * 290 / 3600, abs=0.003)
+
+
+async def test_local_pods_get_no_cloud_only_g1_sensors(hass: HomeAssistant):
+    """The G1 sensors read the cloud API's "g1" section, which local pod data
+    doesn't have -- they must not be created for local entries."""
+    entry = await _setup_local_entry(hass)
+    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator.ingest_post("PP-001", MOCK_LOCAL_PAYLOAD)
+    await hass.async_block_till_done()
+
+    assert hass.states.get("sensor.planetpod_pp_001_state_of_charge") is not None
+    g1_states = [s.entity_id for s in hass.states.async_all("sensor") if "_g1_" in s.entity_id]
+    assert g1_states == []

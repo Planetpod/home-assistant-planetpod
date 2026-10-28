@@ -1,33 +1,34 @@
 # Home Assistant Planetpod Integration
 
-Monitor your Planetpod solar battery from Home Assistant. The integration polls the Planetpod cloud API every 60 seconds — sensor data is routed through Planetpod's servers, not read directly from the hardware on your local network.
+Monitor and control your Planetpod solar battery from Home Assistant. Two connection types are available, chosen when you add the integration — pick whichever section below matches your setup.
 
 You can find the Planetpod manual with more information here: https://drive.google.com/file/d/1IeO2Q0d3dYZvWA1crQhpNoZgeBQ3qnKK/view
 
+| | Cloud | Local |
+|---|---|---|
+| Data path | Through Planetpod's servers (Open API) | Direct, pod ↔ Home Assistant on your LAN |
+| Poll interval | Every 60 seconds | Every ~10 seconds (pod-driven push) |
+| Control entities | No | Yes (Mode, SoC limits, Speed/Planning setpoints, one-shot actions) |
+| Setup | Paste an Open API token | Switch the pod to Home Assistant mode in the app, follow the config flow |
+
+Both connection types share the core battery [sensors](#sensors). Cloud mode adds the Energy Pulse (G1) sensors; Local mode adds P1 and diagnostic sensors, control entities and a bundled dashboard.
+
+---
+
 ## Requirements
 
-- Home Assistant 2024.4.0 or later
+- Home Assistant 2024.7.0 or later
 - A Planetpod account with an active battery
-- A Planetpod Open API token (generated in the app)
 
-## Generating an API token
+Each mode has its own extra requirements, listed in its section below.
 
-1. Open the Planetpod app
-2. Go to **Instellingen → Planetpod beheer**
-3. Scroll down to the **Open API** section
-4. Tap **Token aanmaken**
-5. Tap the copy button next to the token — it is only shown once
-6. The token starts with `pp_` and is valid for 1 year
-
-> Generating a new token revokes the previous one. If you rotate the token, Home Assistant will show a re-authentication banner — enter the new token there.
-
-## Step 1: Via HACS (Recommended)
+## Install via HACS
 
 Click the button below to add the repository to HACS on your Home Assistant instance:
 
 [![Open your Home Assistant instance and add this repository to HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Planetpod&repository=home-assistant-planetpod&category=integration)
 
-Then in HACS, click **Download**, confirm, and restart Home Assistant.
+Then click **Download**, confirm, and restart Home Assistant. Cloud and Local mode are in the same release; you choose the mode when you add the integration. Then follow the section for your mode.
 
 <details>
 <summary>Manual steps (if the button doesn't work)</summary>
@@ -40,24 +41,324 @@ Then in HACS, click **Download**, confirm, and restart Home Assistant.
 
 </details>
 
-## Step 2: Setup
-
-[![Open your Home Assistant instance and start setting up the Planetpod integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=planetpod)
-
-Paste your `pp_` token and confirm.
+---
 
 <details>
-<summary>Manual steps (if the button doesn't work)</summary>
+<summary><strong>☁️ Cloud mode</strong></summary>
 
-1. Go to **Settings → Devices & Services → Add Integration**
-2. Search for **Planetpod**
-3. Paste your `pp_` token and confirm
+Sensor data is routed through Planetpod's servers via the Open API. This is the simplest setup — no network changes needed — but read-only: mode/limits/commands are managed from the Planetpod app, not from Home Assistant.
+
+### Generating an API token
+
+1. Open the Planetpod app
+2. Go to **Instellingen → Planetpod beheer**
+3. Scroll down to the **Open API** section
+4. Tap **Token aanmaken**
+5. Tap the copy button next to the token — it is only shown once
+6. The token starts with `pp_` and is valid for 1 year
+
+> Generating a new token revokes the previous one. If you rotate the token, Home Assistant will show a re-authentication banner — enter the new token there.
+
+### Set up
+
+1. Go to **Settings → Devices & Services → Add Integration** and search for **Planetpod**
+2. Choose **Cloud** and paste the token
+
+### Token expiry & re-authentication
+
+Tokens expire after 1 year by default. When a token expires or is revoked, Home Assistant displays a **Re-authenticate** banner on the integration. Tap it, enter a new token generated from the app, and the integration resumes automatically.
 
 </details>
 
+<details>
+<summary><strong>🏠 Local mode</strong></summary>
+
+The pod talks directly to Home Assistant over your own network, through a local HTTP endpoint HA exposes at `/planetpod`, so commands and data don't make a cloud round-trip. The pod keeps its normal connection to Planetpod's cloud alongside it.
+
+> Requires **pod firmware 1.1.11 or later**. One Planetpod integration handles **every pod on your network**: each pod gets its own device, entities and dashboard view, and is controlled independently.
+
+> **Privacy:** Local mode does not send any sensitive information anywhere — only battery telemetry/control data (the same fields listed in [Sensors](#sensors)) and the connection to Planetpod's cloud that already exists independently of this integration.
+
+### How the read/write cycle works
+
+- The pod **POSTs** its telemetry (SoC, power, temperature, status, etc.) to `/planetpod` roughly **every 10 seconds**. Home Assistant applies it the instant it arrives — no polling delay.
+- The pod also **GETs** `/planetpod` on the same ~10 second cadence to fetch whatever Home Assistant currently wants it to do (mode, setpoint, SoC limits, one-shot actions). There's no push channel from HA to the pod — every command is picked up on the pod's *next* GET, so a command can take up to ~10 seconds to actually apply.
+- Both directions are stateless HTTP, no auth required on the local endpoint (`requires_auth = False`) — it's meant to be reachable only from your own LAN.
+
+### Before you start
+
+1. **Switch your pod to Home Assistant control.** The pod only accepts commands from Home Assistant while it's in Home Assistant mode (`open_homeAssistant`). In the Planetpod app, go to **Instellingen → Batterijmodus → Open → Home Assistant**, and press **Verbinden** on **Home Assistant Lokaal**. Without it the pod doesn't contact Home Assistant at all: no data and no commands.
+2. **Make sure the pod can reach Home Assistant at `http://homeassistant.local:8123`.** The pod always connects to that address (it's fixed in the firmware). This works with a default Home Assistant OS install on the same network as the pod. It does **not** work if you renamed Home Assistant's hostname, changed its port, serve it over HTTPS only, or keep the pod on a separate network/VLAN that HA can't be reached from. See [Connection troubleshooting](#connection-troubleshooting).
+
+### Follow the setup wizard
+
+[![Open your Home Assistant instance and start setting up the Planetpod integration.](https://my.home-assistant.io/badges/config_flow_start.svg)](https://my.home-assistant.io/redirect/config_flow_start/?domain=planetpod)
+
+1. Choose **Local** as the connection type
+2. The wizard shows **Waiting for connection** until the pod's first message arrives (normally within ~10 seconds)
+3. Pick a grid-power reading (**G1 source**): the pod's own reported P1 data, or an existing Home Assistant P1/DSMR sensor. This is shown in the **P1 Balance Source** sensor; the pod itself always balances on its own P1/G1 reading
+4. Its device and sensors appear right away; if [Mushroom](https://github.com/piitaya/lovelace-mushroom) is installed, a **"Planetpod"** dashboard is auto-provisioned into the sidebar (see below) — first appears after one HA restart. More pods on the same network are added automatically as soon as they connect.
+
+<details>
+<summary>Manual setup steps (if the button doesn't work)</summary>
+
+1. Go to **Settings → Devices & Services → Add Integration**
+2. Search for **Planetpod**
+3. Choose **Local**
+
+</details>
+
+Stuck on **Waiting for connection**, or does the pod show as offline? See [Connection troubleshooting](#connection-troubleshooting).
+
+### Sidebar dashboard
+
+A **"Planetpod"** dashboard is created automatically (one view per pod, named after its serial).
+
+> **Requires [Mushroom](https://github.com/piitaya/lovelace-mushroom)** (install via HACS → Frontend). The dashboard is optional: without Mushroom it is not created, and a notice under **Settings → Repairs** explains how to get it. Devices, entities and automations work either way. After installing Mushroom the dashboard is created automatically; restart Home Assistant once for it to appear in the sidebar, then reload the browser page (F5).
+
+Its layout, top to bottom:
+
+| Row | Contents |
+|---|---|
+| **KPI band** | State of Charge, Deployed Power, Temperature, P1 Meter, Pod Mode, Online, Relay Status — at a glance. Pod Mode turns yellow when the firmware takes over (calibration, standby) and red when locked |
+| **Charts** | SoC over the day, hourly Energy (grid import/export + battery charge/discharge), and the draggable **Planning** schedule |
+| **Details** | Mode + SoC limits, one-shot action buttons (Reboot / Calibration / Turn Off BMS), and an Activity log (includes every Pod Mode change, e.g. when calibration starts and ends) |
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ ┌──────┐ ┌────────┐ ┌───────┐ ┌───────┐ ┌───────┐ ┌───────┐ ┌──────┐ │
+│ │ SoC  │ │Deployed│ │ Temp  │ │  P1   │ │  Pod  │ │Online │ │Relay │ │  KPI band
+│ │  %   │ │ Power  │ │  °C   │ │ Meter │ │ Mode  │ │       │ │Status│ │
+│ └──────┘ └────────┘ └───────┘ └───────┘ └───────┘ └───────┘ └──────┘ │
+├──────────────────────────────────────────────────────────────────────┤
+│ ┌────────────────┐  ┌────────────────┐  ┌────────────────┐          │
+│ │   SoC (%)      │  │  Energy Usage  │  │    Planning    │          │  Charts
+│ │  (line chart)  │  │  (hourly bars) │  │ (drag-to-edit) │          │
+│ └────────────────┘  └────────────────┘  └────────────────┘          │
+├──────────────────────────────────────────────────────────────────────┤
+│ ┌───────────┐ ┌───────────┐ ┌───────────┐ ┌────────────────────────┐ │
+│ │  SoC      │ │  Reboot   │ │  Mode     │ │       Activity         │ │  Details
+│ │  Upper/   │ │Calibration│ │(+ Speed   │ │      (log feed)        │ │
+│ │  Lower    │ │Turn Off   │ │ controls  │ │                        │ │
+│ │  Limit    │ │  BMS      │ │if "Speed")│ │                        │ │
+│ └───────────┘ └───────────┘ └───────────┘ └────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+Layout changes ship as ordinary integration updates — the dashboard regenerates automatically the next time Home Assistant (re)starts.
+
+### Modes
+
+The **Mode** select entity controls how the pod's power setpoint is derived. Mode, SoC limits, the Speed Setpoint/Duration/Send, and the Planning schedule are all independent per pod — setting them on one pod's card never affects another pod on the same grid.
+
+| Mode | Behavior | How to activate it |
+|---|---|---|
+| **Balance** | Keeps grid import/export near zero. The pod regulates this itself on its own P1/G1 reading; Home Assistant only switches the mode on. | Select **Balance** in the Mode dropdown — takes effect on its own, no further input needed. |
+| **Standby** | Holds a persistent 0 kW setpoint — the pod neither charges nor discharges. | Select **Standby** — takes effect on its own, no further input needed. |
+| **Speed** | Holds a manually staged kW setpoint for a fixed duration. | Select **Speed** first — this reveals the **Speed Setpoint** (kW) and **Duration** (min) sliders plus a **Send Speed Command** button in the dashboard's Mode card. Set both values, then press the button — nothing applies until you do. |
+| **Planning** | Holds whichever value is set for the *current hour* in the 24-entry hourly schedule (`Planning Hour 00`–`23`, ±kW) — the same source an external optimizer (e.g. EMHASS) could drive. | Select **Planning**, drag each hour's point on the dashboard's Planning chart to the desired kW, then press **Send Planning** — nothing applies until you do. **Mode must actually be set to Planning for the schedule to have any effect** — unlike Send Speed Command, Send Planning has no built-in check for this: it'll happily write your dragged values even while Mode is set to something else, with no warning, and they'll just sit there unused until you switch Mode to Planning. |
+
+All four modes are sent to the pod using the same underlying wire representation firmware expects (`Modus: "solarSmart"`, a `subMode`/`setpoint_kW` pair) — this is an implementation detail, not something you need to configure.
+
+### Actions
+
+**SoC Upper/Lower Limit** (number entities) cap how full/empty the pod will charge/discharge to. Sent to the pod on its next GET.
+
+#### Action buttons
+
+Use the Action buttons to send commands to Planetpod through Home Assistant — these remote commands are mainly for troubleshooting and maintenance.
+
+| Action | What it does | When to use | How to check |
+|---|---|---|---|
+| **Reboot** | Restarts Planetpod's onboard computer. | When Planetpod behaves unexpectedly, or Support requests a restart. | "Had a reboot" appears in the last error log after approximately one minute. |
+| **Calibration** | Calibrates the state of charge (SoC) reading and balances the battery cells. Will charge to ~100%. | To start calibration manually, or when requested by Support. | Calibration mode indicates it is running. A completion message in the error log confirms it has finished. |
+| **Turn-off battery supply** (`Turn Off BMS`) | Switches off the battery system. | When requested by Support, or to shut down completely for transport or service — see "Turn-off battery supply — usage notes" below. | After the complete shutdown procedure below, only one steady red light remains visible through the bottom window. |
+
+> Other Planetpod service actions are part of the real wire protocol but deliberately **not** exposed as HA buttons — they're considered too sensitive/rare for a one-tap local action and are meant to be triggered through Planetpod support or the app instead.
+
+<details>
+<summary>Reboot — usage notes</summary>
+
+A reboot clears the computer's cache and restarts its processes. Charging and discharging pause for approximately one minute while Planetpod starts up and reconnects to Wi-Fi and Home Assistant.
+
+Wait at least one minute between reboots. If Planetpod has lost its connection to Home Assistant and/or Wi-Fi, the command may not reach it — in that case, perform a manual reset as described in the user manual.
+
+</details>
+
+<details>
+<summary>Calibration — what to expect</summary>
+
+Planetpod automatically schedules calibration:
+
+- Every two weeks, starting the next time it receives a charge command. The action button lets you start this cycle manually.
+- Or immediately, if an off-nominal low charge level is detected (undervoltage).
+
+During calibration, Planetpod charges to approximately 100%, starting at 1.6 kW and gradually reducing the charging speed as the battery fills. The cycle ends with a trickle charge to balance the cells.
+
+Planetpod ignores other charge and discharge commands during calibration. Once finished, it leaves Calibration mode, records an informational completion message in the error log, and resumes accepting commands from Home Assistant. To cancel calibration, reboot Planetpod.
+
+</details>
+
+<details>
+<summary>Turn-off battery supply — usage notes</summary>
+
+Turning off the battery system does not fully shut down Planetpod while AC power remains on — the battery system switches off, but the onboard computer continues running on AC power. Rebooting Planetpod turns the Battery supply (BMS) back on.
+
+For a complete shutdown, follow the sequence below.
+
+**Complete shutdown**
+
+1. Switch off the AC input using Planetpod's isolation switch (werkschakelaar) or its dedicated circuit breaker in the distribution board (meterkastgroep).
+2. Wait 30 seconds.
+3. Send the **Turn-off battery supply** command through Home Assistant. Planetpod powers down once it receives the command.
+4. Check the viewing window at the bottom. Shutdown is complete when only one steady red light remains visible — this is the BMS indicator for the battery system.
+5. If other lights remain visible, the system is still active. Confirm that the AC input is off, then send the **Turn-off battery supply** command again. Once Planetpod has shut down, communication is no longer available.
+
+**Starting Planetpod again**
+
+1. Make sure the AC input has been off for at least one minute.
+2. Switch the AC input back on using the isolation switch or dedicated circuit breaker.
+3. Allow approximately one minute for Planetpod to start up and reconnect. Once connected, it resumes accepting charge and discharge commands from Home Assistant.
+
+</details>
+
+### Integrating with EMHASS (or any external optimizer)
+
+**Planning** mode exists specifically as a generic hand-off point for an external optimizer — its 24 `Planning Hour 00`–`23` number entities are just a plain hourly kW schedule that anything can write to, [EMHASS](https://github.com/davidusb-geek/emhass) included.
+
+EMHASS computes a day-ahead (or rolling) optimal charge/discharge schedule from PV/load forecasts and grid tariffs, and publishes it as a sensor (commonly with a `forecasts` attribute — a list of `{timestamp, value}` pairs, typically at 30-minute resolution). To feed that into Planetpod, add an automation that:
+
+1. Triggers whenever EMHASS finishes an optimization (it fires an event) or on EMHASS's own re-run schedule.
+2. Sets `select.planetpod_..._mode` to `planning`.
+3. Takes the forecast for the **next 24 hours only**, averages the values that fall in each clock hour (two values per hour at 30-minute resolution), converts them to Planetpod's units, and writes each hour once with `number.set_value` on the matching `number.planetpod_..._planning_hour_HH` entity.
+
+The 24 Planning entities are a rolling schedule by hour of day: the slot for 15:00 means "the next 15:00". Writing only the next 24 hours keeps tomorrow's values from overwriting today's, and averaging keeps one half-hour from overwriting the other.
+
+```yaml
+automation:
+  - alias: "EMHASS -> Planetpod planning schedule"
+    trigger:
+      - platform: state
+        entity_id: sensor.emhass_p_batt_forecast
+    action:
+      - variables:
+          # Adjust these to your EMHASS sensor (check Developer Tools -> States).
+          forecast: "{{ state_attr('sensor.emhass_p_batt_forecast', 'forecasts') or [] }}"
+          time_key: "timestamp"
+          value_key: "value"
+          # EMHASS battery power is normally in W with positive = discharge;
+          # Planetpod Planning is in kW with positive = charge.
+          to_planetpod_kw: -0.001
+          max_kw: 3.0
+      - variables:
+          schedule: >
+            {% set start = now().replace(minute=0, second=0, microsecond=0) %}
+            {% set ns = namespace(out=[]) %}
+            {% for h in range(24) %}
+              {% set slot_start = start + timedelta(hours=h) %}
+              {% set slot_end = slot_start + timedelta(hours=1) %}
+              {% set acc = namespace(total=0, count=0) %}
+              {% for item in forecast %}
+                {% set t = as_datetime(item[time_key]) %}
+                {% if t is not none and slot_start <= t < slot_end %}
+                  {% set acc.total = acc.total + (item[value_key] | float(0)) %}
+                  {% set acc.count = acc.count + 1 %}
+                {% endif %}
+              {% endfor %}
+              {% if acc.count > 0 %}
+                {% set kw = acc.total / acc.count * to_planetpod_kw %}
+                {% set kw = [[kw, max_kw] | min, -max_kw] | max %}
+                {% set ns.out = ns.out + [{'hour': slot_start.hour, 'kw': kw | round(2)}] %}
+              {% endif %}
+            {% endfor %}
+            {{ ns.out }}
+      - service: select.select_option
+        target: { entity_id: select.planetpod_XXXX_mode }
+        data: { option: "planning" }
+      - repeat:
+          for_each: "{{ schedule }}"
+          sequence:
+            - service: number.set_value
+              target:
+                entity_id: "number.planetpod_XXXX_planning_hour_{{ '%02d' | format(repeat.item.hour) }}"
+              data:
+                value: "{{ repeat.item.kw }}"
+```
+
+A few things worth knowing before wiring this up:
+
+- **Resolution mismatch:** Planning mode is hourly; EMHASS is commonly half-hourly. The automation above uses the **average** of the 30-minute values in each hour, so you lose EMHASS's sub-hourly detail against Planetpod's hourly grid.
+- **Check units, sign and attribute names:** the variables at the top assume a `forecasts` attribute with `timestamp`/`value` keys, values in W, and positive = discharge. EMHASS versions and configs differ, so compare with your own sensor in **Developer Tools → States** and adjust `forecast`, `time_key`, `value_key` and `to_planetpod_kw`. Timestamps must include a timezone offset (EMHASS's do by default).
+- **Keep battery specs in sync:** EMHASS's own config needs Planetpod's real capacity, round-trip efficiency, and max charge/discharge power to produce a physically realistic schedule. The Planning entities only accept values within ±the pod's max charge power (writing anything outside that range fails), which is why the automation clamps to `max_kw` (use 1.484 with sound mode on). Nothing catches an SoC-infeasible schedule (e.g. discharging past `SoC Lower Limit`), so keep EMHASS's SoC bounds matching `SoC Upper/Lower Limit` too.
+- **Not EMHASS-specific:** any planner that can output (or be translated into) a 24-value hourly kW array works the same way — a plain price-reactive automation, a custom AppDaemon/pyscript app, etc. Planners that instead express charge/discharge as time *windows* rather than an hourly array (e.g. Predbat) need an extra translation step to fit Planning mode's hourly grid.
+
+</details>
+
+---
+
+## Connection troubleshooting
+
+*For Local mode.*
+
+If the setup wizard stays on **Waiting for connection**, or the pod shows as **offline** in Home Assistant, the pod isn't reaching Home Assistant.
+
+<details>
+<summary>How the connection works</summary>
+
+The pod connects to Home Assistant, not the other way round. Every ~10 seconds it sends its data to, and fetches its commands from, `http://homeassistant.local:8123/planetpod`. For that to work, all of these must be true:
+
+| Requirement | Why |
+|---|---|
+| The pod is online (WiFi and internet) | The pod learns from the Planetpod cloud that Home Assistant mode is on. After every pod restart it needs the cloud once before it contacts Home Assistant again |
+| The pod is in **Home Assistant mode** | Without it, the pod doesn't contact Home Assistant at all |
+| The name `homeassistant.local` points to your Home Assistant | The pod finds Home Assistant by this name (mDNS), on its own network |
+| Home Assistant answers on port **8123** over plain **HTTP** | The address is fixed in the pod's firmware |
+| The pod's network can reach Home Assistant | No guest network, client isolation or blocking between VLANs |
+
+Home Assistant marks a pod **offline** when nothing has arrived from it for 60 seconds.
+
+</details>
+
+**Work through these checks in order:**
+
+1. **Is the pod online?** Check in the Planetpod app. If it's offline there, fix the pod's WiFi first; the **WiFi Signal Strength** sensor (once connected) should be better than about −75 dBm.
+2. **Is the pod in Home Assistant mode?** Ask Planetpod support to confirm. If the pod restarted recently while the internet was down, it reconnects to Home Assistant only after it has reached the Planetpod cloud again.
+3. **Can your laptop open Home Assistant from the pod's network?** Connect your laptop to the **same WiFi network as the pod**, turn off any VPN, and open `http://homeassistant.local:8123` in the browser (type the `http://` part too):
+   - **Home Assistant opens:** name, port and network are fine; continue with step 6.
+   - **Page not found / can't connect:** continue with steps 4 and 5.
+   - **It only works with `https://`:** see step 4.
+4. **Check Home Assistant's name, port and HTTP:**
+   - **Name:** in **Settings → System → Network**, the hostname must be `homeassistant` (the default). On a Docker/Core install, the host machine itself must answer to `homeassistant.local` (hostname `homeassistant`, with mDNS/Avahi running).
+   - **Port:** Home Assistant must use the default port 8123.
+   - **HTTPS:** if `ssl_certificate` is set under `http:` in `configuration.yaml`, Home Assistant only serves HTTPS and the pod can't connect. Use Nabu Casa or a reverse proxy for HTTPS instead, so Home Assistant itself keeps serving plain HTTP on port 8123.
+   - **Docker:** run the container with `network_mode: host` (the standard Home Assistant setup), so it listens directly on port 8123 of the host.
+   - **Firewall:** on a Core/Docker host, allow incoming traffic on port 8123.
+5. **Check the network between the pod and Home Assistant:**
+   - Put the pod on the same network as Home Assistant, not on a guest network.
+   - Turn off **client isolation** / **AP isolation** for the pod's WiFi.
+   - With separate VLANs or an IoT network: allow traffic from the pod to Home Assistant on port 8123, and forward mDNS between the networks (often called *mDNS reflector* or *multicast forwarding*).
+   - Some mesh systems and routers block multicast between WiFi and wired devices. Look for a setting like *multicast*, *mDNS* or *IGMP snooping*.
+6. **Check whether the pod's messages arrive.**
+   - **If the pod already appears as a device:** open it and look at the **Last POST Received** sensor. A time within the last minute means the connection works.
+   - **If the setup wizard is still waiting** (no device yet), turn on debug logging for Planetpod: go to **Developer Tools → Actions**, choose **Logger: Set level**, switch to YAML mode and run:
+     ```yaml
+     action: logger.set_level
+     data:
+       custom_components.planetpod: debug
+     ```
+     Wait 30 seconds, then open **Settings → System → Logs**, click **Show raw logs**, and search for `PLANETPOD`:
+     - **`POST /planetpod received from <ip>` lines are there:** the pod reaches Home Assistant. If the wizard still waits, contact Planetpod support with these lines.
+     - **No such lines:** the pod isn't reaching Home Assistant; go back over steps 1–5.
+
+     Afterwards, run the same action with `warning` instead of `debug`, or restart Home Assistant, to turn the extra logging off again.
+
+**Still not working?** Contact Planetpod support with: your Home Assistant version and install type (Settings → About), the result of step 3, any `PLANETPOD` log lines, and your router or mesh system model.
+
+---
+
 ## Sensors
 
-One device is created per battery (identified by serial number). Energy Pulse (G1) data is included on the same device; multiple Energy Pulses are not supported. The following sensors are available:
+One device is created per battery (identified by serial number). In Cloud mode, Energy Pulse (G1) data is included on the same device; multiple Energy Pulses are not supported. The following sensors are available:
 
 | Sensor | Source | Unit | Description | Possible values |
 |---|---|---|---|---|
@@ -66,7 +367,7 @@ One device is created per battery (identified by serial number). Energy Pulse (G
 | Online | Battery | — | Whether the pod sent a message to the server in the last 60 seconds. | `online`, `offline` |
 | Charge Status | Battery | — | Latest direction of Planetpod energy flow reported by the pod going on AC connection. | `charge`, `discharge`, `idle` |
 | App Mode | Battery | — | Active control strategy set in the Planetpod app. | `cash`, `solar`, `solarSmart`, `solarPure` |
-| Pod Mode | Battery | — | Internal operating state reported by the pod firmware. When pod is in standby it experiences an error; this can be resolved automatically if the error is cleared. When pod is in locked it has encountered a severe error pending review from Planetpod before being resolved, contact Planetpod. Calibration is a mode where Planetpod calibrates itself by charging to 100% and balancing after that; after calibration is finished, pod will go to the latest set strategy. Calibration will happen at minimum once per 2 weeks, or if the battery is detected to be in need of calibration. Speed is a mode where pod follows a set charging power. Balance is a mode where pod is balancing P1 to 0. | `speed`, `balance`, `standby`, `locked`, `calibration`, `unknown` |
+| Pod Mode | Battery | — | Internal operating state reported by the pod firmware. When pod is in standby it experiences an error; this can be resolved automatically if the error is cleared. When pod is in locked it has encountered a severe error pending review from Planetpod before being resolved, contact Planetpod. Calibration is a mode where Planetpod calibrates itself by charging to 100% and balancing after that; after calibration is finished, pod will go to the latest set strategy. Calibration will happen at minimum once per 2 weeks, or if the battery is detected to be in need of calibration. Speed is a mode where pod follows a set charging power. Balance is a mode where pod is balancing P1 to 0. | `speed` (shown as Normal), `balance`, `standby`, `shortStandby`, `calibration`, `cell_health_protect`, `locked`, `developer`, `factorycheck`, `unknown` (any value newer firmware adds); Cloud mode can also report the app modes (`cash`, `solar`, `solarSmart`, …) |
 | Deployed Power | Battery | kW | AC power the pod is currently delivering to or absorbing from the grid. The pod will match this value with Requested Power Received by Pod as closely as possible at that moment. | negative = discharging to grid, positive = charging from grid, 0 = idle |
 | Requested Power | Battery | kW | Power setpoint scheduled for the latest minute by the Planetpod server. | negative = discharge request, positive = charge request, 0 = idle |
 | Requested Power Received by Pod | Battery | kW | Power setpoint to execute as received by the pod's control module — null when no active command received. | negative = discharge, positive = charge, null at idle |
@@ -84,8 +385,12 @@ One device is created per battery (identified by serial number). Energy Pulse (G
 | G1 Solar Phase | Energy Pulse | — | Number of phases the solar installation is wired across, as configured for this grid. | `single`, `three` |
 | G1 Grid Import Power | Energy Pulse | kW | Power currently being drawn from the grid. | numeric, ≥ 0 |
 | G1 Grid Export Power | Energy Pulse | kW | Power currently being exported to the grid (e.g. solar surplus). | numeric, ≥ 0 |
+| Last Error | Battery | — | Local mode only. The pod's latest error messages, newest first, each with its severity and `(resolved)` once cleared. See [Errors](#errors). | text, or `None` |
+| Last POST Received | Battery | — | Local mode only. When the pod last sent its data to Home Assistant; the raw message is in the `raw_payload` attribute. | timestamp |
+| Last GET Sent | Battery | — | Local mode only. When Home Assistant last answered the pod with its commands; the raw answer is in the `raw_response` attribute. | timestamp |
 
-## Sensors showing "Unknown"
+<details>
+<summary>Sensors showing "Unknown"</summary>
 
 Some sensors may show **Unknown** until the hardware has operated for a period of time:
 
@@ -95,11 +400,182 @@ Some sensors may show **Unknown** until the hardware has operated for a period o
 | **Total Cycles** | Populated after a pod (re)boot |
 | **AC Voltage** | Reported by the pod's inverters when Relay Status is `230_ON` — `0` if inverters have not sent data yet, null if inverters are OFF |
 | **Requested Power Received by Pod** | Only non-null when the pod is actively executing a power command — null at idle is expected |
-| **G1 Solar Power / G1 Raw Solar Current / G1 Solar Phase / G1 Grid Import Power / G1 Grid Export Power** | Only populated for pods with a G1 module or a standalone P1 meter reporting solar/grid data — stays Unknown for pods without one |
+| **G1 Solar Power / G1 Raw Solar Current / G1 Solar Phase / G1 Grid Import Power / G1 Grid Export Power** | Cloud mode only. Only populated for pods with a G1 module or a standalone P1 meter reporting solar/grid data — stays Unknown for pods without one |
 
-## Token expiry & re-authentication
+</details>
 
-Tokens expire after 1 year by default. When a token expires or is revoked, Home Assistant will display a **Re-authenticate** banner on the integration. Tap it, enter a new token generated from the app, and the integration resumes automatically.
+### Errors
+
+Local mode shows the pod's error messages in the **Last Error** sensor, and every change appears in the dashboard's **Activity** log. Each message starts with its severity, for example `[Minor error] E405 (Lost cloud connection)`, and ends with `(resolved)` once the pod reports the error has cleared. The full details of every message are in the sensor's `error_logs` attribute, and `highest_severity` holds the most severe level currently reported (handy for automations).
+
+| Severity | Meaning | What to do |
+|---|---|---|
+| **Info** | Normal operation: firmware updates, restarts, calibration start/finish | Nothing |
+| **Minor warning** | The pod noticed something; operation isn't affected | Nothing, no need for concern |
+| **Minor error** | Something failed temporarily, e.g. a lost cloud connection or a communication retry; operation isn't affected | Nothing, it recovers by itself |
+| **Major error** | A condition that requires the pod to stop, mostly a temperature limit or the AC supply switching off. The pod goes idle (no charging or discharging) until the condition clears | Contact Planetpod if it doesn't clear |
+| **Fatal** | The pod has stopped for safety | Contact Planetpod |
+
+Messages you're most likely to see:
+
+| Code | Severity | Meaning | Action |
+|---|---|---|---|
+| E401A / E401B | Info / Minor error | A firmware update was tried / installed; the pod restarts | None |
+| E407A–C | Info | A firmware update attempt failed; it's retried later | None |
+| E402 | Info | The pod restarted (reason included) | None, unless it repeats often |
+| E300 / E901 | Info | Calibration scheduled / finished | None |
+| E060 | Info | Discharge current limited near the low voltage limit | None |
+| E405 | Minor error | Lost connection to the Planetpod cloud; "(resolved)" when it's back | None, it recovers by itself |
+| E406 | Minor warning | The pod stays in short standby because another error persists; resolves automatically | Look at the other active errors |
+| E902 | Minor warning | Calibration aborted due to overvoltage | None, unless it keeps happening |
+| E501 | Minor error | A discharge was requested while SoC is below 3% | None |
+| E036C | Major error | SoC below minimum; the pod starts a calibration run | None; wait for calibration to finish |
+| E013 / E035 | Major error | Pod or cell temperature above its limit | Check ventilation around the pod; contact Planetpod if it persists |
+| E043, E044, E046, E048–E053 | Fatal | Critical BMS alarm (over-voltage, over-current, temperature) | Contact Planetpod |
+| E042, E045, E047 | Major error | BMS alarm: pack/cell under-voltage or critically low SoC | Contact Planetpod if it doesn't clear |
+| E033C | Fatal | Battery system locked | Contact Planetpod |
+
+<details>
+<summary>All error codes</summary>
+
+Taken from the pod firmware's error list. Codes that never reach customers in normal operation (factory tests, debug logs) are included for completeness.
+
+| Code | Severity | Type | Description |
+|---|---|---|---|
+| E001 | Major error | Temperature Error | BIC0 temperature above threshold |
+| E002 | Major error | Voltage Error | BIC0 overvoltage |
+| E003 | Major error | Current Error | BIC0 current exceeds threshold |
+| E005 | Major error | Temperature Error | BIC1 temperature above threshold |
+| E006 | Major error | Voltage Error | BIC1 overvoltage |
+| E007 | Major error | Current Error | BIC1 current exceeds threshold |
+| E009 | Minor error | Current Error | Total DC current exceeds pod threshold |
+| E010 | Major error | Battery Error | Battery current exceeds threshold |
+| E011 | Major error | Battery Error | Battery overvoltage |
+| E012 | Major error | Battery Error | Battery undervoltage |
+| E013 | Major error | Temperature Error | Pod temperature above high threshold |
+| E014 | Minor error | Temperature Error | Pod temperature below low threshold |
+| E025B | Minor warning | BIC Fault (hardware) | BIC 1 fault |
+| E025C | Minor warning | BIC Fault (hardware) | BIC 0 overtemperature |
+| E025D | Minor warning | BIC Fault (hardware) | BIC 1 overtemperature |
+| E026A | Major error | BIC Fault | Over-temperature protection triggered BIC 0 |
+| E026B | Major error | BIC Fault | Over-temperature protection triggered BIC 1 |
+| E027A | Major error | BIC Fault | Over-voltage protection triggered BIC 0 |
+| E027B | Major error | BIC Fault | Over-voltage protection triggered BIC 1 |
+| E028A | Major error | BIC Fault | Over-current protection triggered BIC 0 |
+| E028B | Major error | BIC Fault | Over-current protection triggered BIC 1 |
+| E029A | Minor error | BIC Fault | AC failure detected BIC 0 |
+| E029B | Minor error | BIC Fault | AC failure detected BIC 1 |
+| E030A | Major error | BIC Fault | Fan failure detected BIC 0 |
+| E030B | Major error | BIC Fault | Fan failure detected BIC 1 |
+| E031A | Major error | BIC Fault | High temperature detected BIC 0 |
+| E031B | Major error | BIC Fault | High temperature detected BIC 1 |
+| E032A | Fatal | BIC Fault | Short-circuit protection BIC 0 |
+| E032B | Fatal | BIC Fault | Short-circuit protection BIC 1 |
+| E033A | Major error | Battery Error | Critical battery failure level 03 (alarm) detected during operation, see BMS alarm level 2 |
+| E033C | Fatal | Battery Error | Battery system locked |
+| E035 | Major error | Temperature Error | Cell temperature above threshold |
+| E036 | Fatal | Temperature Error | Cell, BIC, BMS or SCU above threshold |
+| E036A | Minor warning | Cell voltage low | Cell voltage nearing threshold |
+| E036B | Major error | BMS_ERROR | Cell undervoltage |
+| E036C | Major error | SOC low | SOC below minimum threshold, starting calibration run |
+| E037 | Major error | Cell overvoltage | Cell voltage over threshold |
+| E037A | Fatal | Fatal Cell overvoltage | Cell voltage over fatal threshold |
+| E038 | Minor warning | Backuppower detect | Backup power detected |
+| E039 | Minor error | BICChecker | SystemConfig not as expected |
+| E040 | Minor error | BICChecker | Direction not as expected |
+| E041 | Minor error | BICChecker | bidirectionConfig not as expected |
+| E042 | Major error | BMS Alarm | Pack under-voltage critical |
+| E0429 | Minor warning | BMS Unlock | BMS is not in locked state, unlock skipped |
+| E042A | Minor warning | BMS Alarm Data 1 | BMS alarm details |
+| E042B | Minor warning | BMS Unlocked | BMS is in unlocked state! |
+| E042C | Minor warning | BMS Unlock PGN | Received BMS PGN but not the expected data |
+| E043 | Fatal | BMS Alarm | Pack over-voltage critical |
+| E044 | Fatal | BMS Alarm | Discharging over-current critical |
+| E045 | Major error | BMS Alarm | Low SOC critical |
+| E046 | Fatal | BMS Alarm | Cell over-voltage critical |
+| E047 | Major error | BMS Alarm | Cell under-voltage critical |
+| E048 | Fatal | BMS Alarm | High cell voltage difference critical |
+| E049 | Fatal | BMS Alarm | Charging over-temperature critical |
+| E050 | Fatal | BMS Alarm | Charging under-temperature critical |
+| E051 | Fatal | BMS Alarm | Discharging over-temperature critical |
+| E052 | Fatal | BMS Alarm | Discharging under-temperature critical |
+| E053 | Fatal | BMS Alarm | High cell temperature difference critical |
+| E054 | Major error | BMS Alarm | Voltage Aquisition Fault |
+| E055 | Major error | BMS Alarm | Temperature Aquisition Fault |
+| E060 | Info | Low voltage limit | Discharge current limit |
+| E109 | Minor error | Data expired | Data expired in BIC_Data |
+| E111 | Minor error | Data expired | No BIC and SCU temp |
+| E112 | Minor warning | Data expired | sameGroup=true but no G1 devices connected |
+| E113 | Minor warning | Data expired | G1Device solar_data expired for balancing device |
+| E114 | Minor warning | Data expired | G1Device solar_data expired for non-balancing device |
+| E120A | Minor warning | CAN Queue full | failed to send message to queue |
+| E120B | Minor error | BMS Update | Starting BMS firmware update |
+| E121 | Info | BMSUpdater | BMS firmware version changed |
+| E122A | Minor warning | BMS Update | Incorrect password for BMS firmware update |
+| E122B | Minor warning | BMS Update | Update disabled |
+| E123 | Minor error | BMS Update | CAN timeout |
+| E200 | Minor error | CAN Fault | Error Sending BIC Read Operation Command |
+| E200A | Minor error | CAN Fault | Error Sending BIC Read Direction Command |
+| E200B | Minor error | CAN Fault | Error Sending BIC Read VOUT Command |
+| E201 | Minor error | CAN Fault | Error Sending BIC Read VIN Command |
+| E202 | Minor error | CAN Fault | Error Sending BIC Read Temperature Command |
+| E203 | Minor error | CAN Fault | Error Sending BIC Read IOUT Command |
+| E204 | Minor error | CAN Fault | Error Sending BIC Read Fault Status Command |
+| E205 | Minor error | CAN Fault | Error Sending BIC Read ScalingFactor Command |
+| E205A | Minor error | CAN Fault | Error Sending BIC Read SystemStatus Command |
+| E206 | Minor error | CAN Fault | Error Sending BIC Read IOUT_SET Command |
+| E207 | Minor error | CAN Fault | Error Sending VOUT_SET Command |
+| E207A | Minor error | CAN Fault | Error Sending BIC Read reverse_IOUT_SET Command |
+| E208 | Minor error | CAN Fault | Error Sending BIC Read VOUT_SET Command |
+| E208A | Minor error | CAN Fault | Error Sending Reverse_VOUT_SET Command |
+| E209 | Minor error | CAN Fault | Error Sending BIC Read reverseVOUT_SET Command |
+| E209A | Minor error | CAN Fault | Error Sending IOUT_SET Command |
+| E210 | Minor error | CAN Fault | Error Sending Reverse_IOUT_SET Command |
+| E211 | Minor error | Communication Error | Error Sending Direction Control Command |
+| E212 | Minor warning | Communication Error | Error Sending System Configuration Command |
+| E213 | Minor warning | Communication Error | Error Sending read System Configuration Command |
+| E214 | Minor warning | Communication Error | Error Sending Bidirectional Configuration Command |
+| E215 | Minor warning | Communication Error | Error Sending read Bidirectional Configuration Command |
+| E300 | Info | planned calibration | Starting a scheduled calibration at next charge cycle |
+| E305 | Major error | PCF8574 Init fail | PCF8574 Communication Initialized |
+| E306 | Major error | Communication Error | Failed to initialize PCF8574 (write failure) |
+| E307 | Major error | NVS | NVS Initialization failed |
+| E308 | Major error | NVS | failed to enqueue NVS write request |
+| E401A | Info | OTA Update | Trying OTA update |
+| E401B | Minor error | OTA Update | OTA update successful, restarting after 15sec |
+| E402 | Info | Reboot | Pod restarted (description includes the reason) |
+| E405 | Minor error | Lost cloud connection | Pod lost (or restored) its connection to the Planetpod cloud |
+| E406 | Minor warning | Extended Short Standby | Pod stays in short standby because errors persist; resolves automatically |
+| E407A | Info | OTA Update fail | Failed to set boot partition: |
+| E407B | Info | OTA Update fail | Could not get next update partition after succesfull download |
+| E407C | Info | OTA Update fail | OTA fail: |
+| E409A | Info | NVS Erasing | NVS partition erased |
+| E409B | Info | NVS Erasing perserve url | NVS partition erased |
+| E410 | Minor warning | Low internal memory | Internal free:  bytes |
+| E411 | Info | P1 Balance Ducking | Balance mode reduced power to respect the grid connection |
+| E501 | Minor error | Output | Discharge command while SOC < 3 |
+| E503 | Minor warning | Output | BIC_Data power calc not valid |
+| E504 | Minor warning | Output | BMSBatteryData1 power calc not valid |
+| E505 | Minor warning | Output | BMSSystemData2 power calc not valid |
+| E506 | Minor warning | Output | BMSCellData1 power calc not valid |
+| E508 | Minor warning | Output | BIC_Data power calc not valid |
+| E509 | Minor warning | Output | BMSBatteryData1 power calc not valid |
+| E510 | Minor warning | Output | BMSSystemData2 power calc not valid |
+| E511 | Minor warning | Output | BMSCellData1 power calc not valid |
+| E512 | Minor warning | Output | Solar power calc not valid |
+| E513 | Minor warning | Output | BMSCellData2 power calc not valid |
+| E514 | Minor warning | Output | BMSCellData2 power calc not valid |
+| E600 | Minor warning | FactoryCheck | Not started calib, no BMS data |
+| E601 | Minor warning | FactoryCheck | Not started calib, no BMS data during discharge |
+| E602 | Info | FactoryCheck | Factory complete, turning bms off |
+| E603 | Info | FactoryCheck | Starting calibration task |
+| E604 | Minor warning | FactoryCheck | Discharge too fast during factory test |
+| E901 | Info | Calibration | Calibration run finished |
+| E902 | Minor warning | Calibration | Calibration aborted due to overvoltage |
+| E988 | Minor warning | Test log | Misread can bit, starting 3 S timer |
+
+</details>
+
 
 ## Support
 

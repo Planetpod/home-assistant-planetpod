@@ -10,3 +10,107 @@ DEFAULT_API_URL = "https://storm.planetpod.energy"
 DEFAULT_SCAN_INTERVAL = 60
 
 ATTR_ATTRIBUTION = "Data provided by Planetpod"
+
+CONF_CONNECTION_TYPE = "connection_type"
+CONNECTION_TYPE_CLOUD = "cloud"
+CONNECTION_TYPE_LOCAL = "local"
+
+CONF_SOC_UPPER_LIMIT = "soc_upper_limit_pct"
+CONF_SOC_LOWER_LIMIT = "soc_lower_limit_pct"
+CONF_SOUND_MODE = "sound_mode"
+
+DEFAULT_SOC_UPPER_LIMIT = 85
+DEFAULT_SOC_LOWER_LIMIT = 20
+DEFAULT_SOUND_MODE = False
+
+# Battery safety floor -- never let the SoC Lower Limit slider go below this.
+MIN_SOC_LOWER_LIMIT_PCT = 5
+MAX_SOC_UPPER_LIMIT_PCT = 100
+
+MAX_CHARGE_POWER_KW = 3.0
+MAX_CHARGE_POWER_KW_SOUND_MODE = 1.484
+
+CONF_G1_SOURCE = "g1_source"
+G1_SOURCE_POD = "pod_reported"
+G1_SOURCE_HA_SENSOR = "ha_sensor"
+CONF_G1_HA_ENTITY_ID = "g1_ha_entity_id"
+
+CONF_MODE = "mode"
+MODE_BALANCE = "balance"
+MODE_SPEED = "speed"
+MODE_STANDBY = "standby"
+MODE_PLANNING = "planning"
+DEFAULT_MODE = MODE_BALANCE
+
+CONF_SPEED_SETPOINT_KW = "speed_setpoint_kw"
+DEFAULT_SPEED_SETPOINT_KW = 0.0
+SPEED_SETPOINT_TIMEOUT_MINUTES = 30
+
+CONF_SPEED_SETPOINT_DURATION_MIN = "speed_setpoint_duration_min"
+DEFAULT_SPEED_SETPOINT_DURATION_MIN = 30
+MIN_SPEED_SETPOINT_DURATION_MIN = 1
+MAX_SPEED_SETPOINT_DURATION_MIN = 720
+
+# Persisted so an active Speed Setpoint command survives a coordinator
+# reload (HA restart, integration reinstall/update) instead of silently
+# reverting to idle with time still remaining.
+CONF_SPEED_SETPOINT_EXPIRES_AT = "speed_setpoint_expires_at"
+CONF_SENT_SPEED_SETPOINT_KW = "sent_speed_setpoint_kw"
+
+# Persisted so a one-shot command (Reboot/Calibration/...) queued via a
+# button press isn't silently dropped if a reload happens before the pod's
+# next GET picks it up.
+CONF_PENDING_COMMANDS = "pending_commands"
+
+ONLINE_TIMEOUT_SECONDS = 60
+
+# How often the local coordinator re-checks online status with no new pod
+# traffic -- must be well under ONLINE_TIMEOUT_SECONDS so a pod that simply
+# stops POSTing is still caught promptly, since nothing else would ever
+# trigger that recheck (see PlanetpodLocalCoordinator._handle_online_recheck).
+ONLINE_RECHECK_INTERVAL_SECONDS = 15
+
+QUERY_PARAM_SERIAL = "serial"
+HTTP_VIEW_URL = "/planetpod"
+
+PENDING_PODS_KEY = "_pending_pods"
+
+ATTR_ATTRIBUTION_LOCAL = "Data provided by your Planetpod (local)"
+
+# Day-ahead planning: 24 writable power setpoints (one per hour, in
+# entry.options as "planning_hour_00".."planning_hour_23"), driven by the
+# Planning dashboard card. Reuses the Speed Setpoint power range since both
+# represent a requested kW the pod should hold.
+PLANNING_HOURS: tuple[int, ...] = tuple(range(24))
+DEFAULT_PLANNING_POWER_KW = 0.0
+
+# podStatus.podMode as sent in every POST (firmware Podmode[]), plus the
+# extra values the cloud's pod_status.pod_modus enum can return. "speed" is
+# the firmware's normal mode: it follows the requested setpoint.
+POD_MODE_LABELS: dict[str, str] = {
+    "speed": "Normal",
+    "balance": "Balance",
+    "standby": "Standby",
+    "shortStandby": "Short Standby",
+    "calibration": "Calibration",
+    "cell_health_protect": "Cell Health Protection",
+    "locked": "Locked",
+    "developer": "Developer",
+    "factorycheck": "Factory Check",
+    "cash": "Cash",
+    "solar": "Solar",
+    "solarSmart": "Solar Smart",
+    "solarSmartSpeed": "Solar Smart (Speed)",
+    "solarSmartBalance": "Solar Smart (Balance)",
+    "solarPure": "Solar Pure",
+    "unknown": "Unknown",
+}
+
+# errorLogs[].severity, firmware's e_Error_Severety (ErrorLogger.h).
+ERROR_SEVERITY_LABELS: dict[int, str] = {
+    1: "Info",
+    2: "Minor warning",
+    3: "Minor error",
+    4: "Major error",
+    5: "Fatal",
+}

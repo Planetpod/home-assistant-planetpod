@@ -1,0 +1,442 @@
+"""Auto-provisions the "Planetpod" Lovelace dashboard from code.
+
+There is no public/supported Home Assistant API for an integration to
+create a storage-mode dashboard -- the dashboards collection lives as a
+local variable inside lovelace's own async_setup() and is never exposed via
+hass.data. This module reconstructs a second DashboardsCollection pointed
+at the same on-disk storage key (confirmed safe by reading
+homeassistant/components/lovelace/dashboard.py: the storage key is fixed,
+not per-instance) to create-or-update our dashboard idempotently on every
+integration setup, so dashboard layout changes ship as ordinary code
+changes/releases instead of manual per-install edits.
+
+This deliberately touches HA internals with no stability guarantee --
+every call in async_ensure_dashboard is wrapped so a failure here (e.g. an
+HA core update renaming these classes) can never take down the rest of the
+integration; it just logs and the dashboard doesn't update that run.
+
+Caveat: creating the dashboard for the first time registers it in the
+dashboards collection but the *sidebar panel* only appears after an HA
+restart (the live lovelace panel registry only reacts to changes on its
+own collection instance, which this module can't reach). Content updates
+to an already-registered dashboard are saved through lovelace's own
+instance (see _live_dashboard), so they take effect without a restart.
+"""
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import issue_registry as ir
+
+from .const import DOMAIN, MAX_CHARGE_POWER_KW, PLANNING_HOURS, POD_MODE_LABELS
+
+_LOGGER = logging.getLogger(__name__)
+
+DASHBOARD_URL_PATH = "planetpod-home"
+DASHBOARD_TITLE = "Planetpod"
+DASHBOARD_ICON = "mdi:battery-charging-high"
+
+# The dashboard's control cards are Mushroom cards, which we don't bundle --
+# without it every one of them renders as "Configuration error".
+MUSHROOM_ISSUE_ID = "mushroom_missing"
+MUSHROOM_URL = "https://github.com/piitaya/lovelace-mushroom"
+
+
+def _live_dashboard(hass: HomeAssistant, url_path: str) -> Any:
+    """Lovelace's own config object for a dashboard, or None before it's registered.
+
+    A dashboard created by this module only gets registered after an HA restart.
+    """
+    data = hass.data.get("lovelace")
+    # LovelaceData dataclass on newer HA, a plain dict on older releases.
+    dashboards = getattr(data, "dashboards", None) or (
+        data.get("dashboards") if isinstance(data, dict) else None
+    )
+    return dashboards.get(url_path) if dashboards else None
+
+
+async def _async_mushroom_installed(hass: HomeAssistant) -> bool:
+    """Whether a Mushroom dashboard resource is registered (HACS or manual)."""
+    data = hass.data.get("lovelace")
+    # LovelaceData dataclass on newer HA, a plain dict on older releases.
+    resources = getattr(data, "resources", None) or (
+        data.get("resources") if isinstance(data, dict) else None
+    )
+    if resources is None:
+        return False
+    await resources.async_get_info()  # loads storage-mode resources if not yet loaded
+    return any("mushroom" in (item.get("url") or "").lower() for item in resources.async_items())
+
+
+def _eid(
+    registry: er.EntityRegistry, entry_id: str, serial: str, domain: str, key: str
+) -> str | None:
+    """Resolve a Planetpod entity_id from its unique_id, or None if not yet registered."""
+    return registry.async_get_entity_id(domain, DOMAIN, f"{entry_id}_{serial}_{key}")
+
+
+def _build_view(registry: er.EntityRegistry, entry_id: str, serial: str) -> dict[str, Any] | None:
+    """Build one pod's dashboard view, or None if its core entities aren't registered yet."""
+    soc = _eid(registry, entry_id, serial, "sensor", "soc_pct")
+    upper = _eid(registry, entry_id, serial, "number", "soc_upper_limit_pct")
+    lower = _eid(registry, entry_id, serial, "number", "soc_lower_limit_pct")
+    grid_delivered = _eid(registry, entry_id, serial, "sensor", "energy_grid_delivered_kwh")
+    grid_returned = _eid(registry, entry_id, serial, "sensor", "energy_grid_returned_kwh")
+    battery_net = _eid(registry, entry_id, serial, "sensor", "energy_battery_net_kwh")
+    if not all((soc, upper, lower, grid_delivered, grid_returned, battery_net)):
+        return None
+
+    planning_entities = [
+        _eid(registry, entry_id, serial, "number", f"planning_hour_{hour:02d}")
+        for hour in PLANNING_HOURS
+    ]
+    if not all(planning_entities):
+        return None
+
+    charge_status = _eid(registry, entry_id, serial, "sensor", "charge_status")
+    deployed_power = _eid(registry, entry_id, serial, "sensor", "deployed_power_kw")
+    requested_power = _eid(registry, entry_id, serial, "sensor", "requested_power_kw")
+    received_by_pod = _eid(registry, entry_id, serial, "sensor", "received_by_pod_power_kw")
+    battery_temp = _eid(registry, entry_id, serial, "sensor", "avg_battery_temp_c")
+    p1_delivered = _eid(registry, entry_id, serial, "sensor", "balance_g1_power_delivered_kw")
+    p1_returned = _eid(registry, entry_id, serial, "sensor", "balance_g1_power_returned_kw")
+    online = _eid(registry, entry_id, serial, "sensor", "online")
+    relay_status = _eid(registry, entry_id, serial, "sensor", "relay_status")
+    pod_mode = _eid(registry, entry_id, serial, "sensor", "pod_mode")
+    last_error = _eid(registry, entry_id, serial, "sensor", "last_error")
+    mode_entity = _eid(registry, entry_id, serial, "select", "mode")
+    speed_setpoint = _eid(registry, entry_id, serial, "number", "speed_setpoint_kw")
+    speed_duration = _eid(registry, entry_id, serial, "number", "speed_setpoint_duration_min")
+    send_speed_button = _eid(registry, entry_id, serial, "button", "send_speed_command")
+    if not all(
+        (
+            charge_status,
+            deployed_power,
+            requested_power,
+            received_by_pod,
+            battery_temp,
+            p1_delivered,
+            p1_returned,
+            pod_mode,
+            online,
+            relay_status,
+        )
+    ):
+        return None
+
+
+    kpi_tiles = [
+        {
+            "kind": "value_subtitle",
+            "label": "State of Charge",
+            "entity": soc,
+            "unit": "%",
+            "subtitle_entity": charge_status,
+        },
+        {
+            "kind": "dual_signed",
+            "label": "Deployed Power",
+            "primary_entity": deployed_power,
+            # What the pod's controller actually targets. HA's own setpoint is
+            # a grid target in Balance mode and ignored during calibration.
+            "secondary_entity": received_by_pod,
+            "secondary_label": "Received by pod",
+            "unit": "kW",
+        },
+        {
+            "kind": "value",
+            "label": "Temperature",
+            "entity": battery_temp,
+            "unit": "°C",
+        },
+        {
+            "kind": "net_signed",
+            "label": "P1 Meter",
+            "positive_entity": p1_delivered,
+            "negative_entity": p1_returned,
+            "unit": "kW",
+        },
+        {
+            "kind": "text",
+            "label": "Pod Mode",
+            "entity": pod_mode,
+            "labels": POD_MODE_LABELS,
+            # Green = following commands; yellow = firmware has taken over.
+            "colors": {
+                "speed": "#44F4B3",
+                "balance": "#44F4B3",
+                "calibration": "#ffc53a",
+                "standby": "#ffc53a",
+                "shortStandby": "#ffc53a",
+                "cell_health_protect": "#ffc53a",
+                "locked": "#f8333c",
+            },
+        },
+        {
+            "kind": "text",
+            "label": "Online",
+            "entity": online,
+            "colors": {"online": "#44F4B3", "offline": "#f8333c"},
+        },
+        {
+            "kind": "text",
+            "label": "Relay Status",
+            "entity": relay_status,
+            "colors": {"230_ON": "#44F4B3", "230_OFF": "#f8333c"},
+        },
+    ]
+
+    ENTITY_LABELS = {
+        "soc_upper_limit_pct": "SoC Upper Limit",
+        "soc_lower_limit_pct": "SoC Lower Limit",
+        "reboot": "Reboot",
+        "toggle_calibration": "Calibration",
+        "turn_off_bms": "Turn Off BMS",
+    }
+
+    def _eids(*keys_domains: tuple[str, str]) -> list[tuple[str, str]]:
+        return [
+            (e, ENTITY_LABELS[key])
+            for key, domain in keys_domains
+            if (e := _eid(registry, entry_id, serial, domain, key))
+        ]
+
+    entity_col_3 = _eids(("soc_upper_limit_pct", "number"), ("soc_lower_limit_pct", "number"))
+    buttons = _eids(
+        ("reboot", "button"), ("toggle_calibration", "button"), ("turn_off_bms", "button")
+    )
+
+    mode_column_cards: list[dict[str, Any]] = []
+    if mode_entity:
+        mode_column_cards.append(
+            {"type": "custom:mushroom-entity-card", "entity": mode_entity, "name": "Mode"}
+        )
+        if speed_setpoint and speed_duration and send_speed_button:
+            mode_column_cards.append(
+                {
+                    "type": "conditional",
+                    "conditions": [{"entity": mode_entity, "state": "speed"}],
+                    "card": {
+                        "type": "vertical-stack",
+                        "cards": [
+                            {
+                                "type": "custom:mushroom-number-card",
+                                "entity": speed_setpoint,
+                                "name": "Speed Setpoint",
+                            },
+                            {
+                                "type": "custom:mushroom-number-card",
+                                "entity": speed_duration,
+                                "name": "Duration (min)",
+                            },
+                            {
+                                "type": "custom:mushroom-entity-card",
+                                "entity": send_speed_button,
+                                "name": "Send Speed Command",
+                                "icon_color": "#f8333c",
+                            },
+                        ],
+                    },
+                }
+            )
+
+    activity_entities = [
+        e
+        for e in (
+            mode_entity,
+            *(e for e, _label in entity_col_3),
+            *(e for e, _label in buttons),
+            *planning_entities,
+            soc,
+            deployed_power,
+            requested_power,
+            pod_mode,
+            last_error,
+            online,
+            relay_status,
+            speed_setpoint,
+            speed_duration,
+            send_speed_button,
+        )
+        if e
+    ]
+
+    return {
+        "title": f"Planetpod {serial}",
+        "path": f"pod-{serial}",
+        "type": "sections",
+        "max_columns": 4,
+        "sections": [
+            {
+                "type": "grid",
+                "column_span": 4,
+                "cards": [
+                    {
+                        "type": "custom:planetpod-kpi-card",
+                        "tiles": kpi_tiles,
+                        "grid_options": {"columns": "full", "rows": "auto"},
+                    },
+                ],
+            },
+            {
+                "type": "grid",
+                "column_span": 4,
+                "cards": [
+                    {
+                        "type": "custom:planetpod-soc-card",
+                        "title": "SoC (%)",
+                        "entity": soc,
+                        "upper_limit_entity": upper,
+                        "lower_limit_entity": lower,
+                        "grid_options": {"columns": 16, "rows": "auto"},
+                    },
+                    {
+                        "type": "custom:planetpod-energy-card",
+                        "title": "Energy Usage",
+                        "grid_delivered_entity": grid_delivered,
+                        "grid_returned_entity": grid_returned,
+                        "battery_entity": battery_net,
+                        "grid_options": {"columns": 16, "rows": "auto"},
+                    },
+                    {
+                        "type": "custom:planetpod-planning-card",
+                        "title": "Planning",
+                        "entities": planning_entities,
+                        "max_power_kw": MAX_CHARGE_POWER_KW,
+                        "grid_options": {"columns": 16, "rows": "auto"},
+                    },
+                ],
+            },
+            {
+                "type": "grid",
+                "column_span": 4,
+                "cards": [
+                    {
+                        "type": "vertical-stack",
+                        "cards": [
+                            {"type": "custom:mushroom-entity-card", "entity": e, "name": label}
+                            for e, label in entity_col_3
+                        ],
+                        "grid_options": {"columns": 10, "rows": "auto"},
+                    },
+                    {
+                        "type": "vertical-stack",
+                        "cards": [
+                            {
+                                "type": "custom:mushroom-entity-card",
+                                "entity": e,
+                                "name": label,
+                                "icon_color": "#f8333c",
+                            }
+                            for e, label in buttons
+                        ],
+                        "grid_options": {"columns": 8, "rows": "auto"},
+                    },
+                    {
+                        "type": "vertical-stack",
+                        "cards": mode_column_cards,
+                        "grid_options": {"columns": 10, "rows": "auto"},
+                    },
+                    {
+                        "type": "logbook",
+                        "entities": activity_entities,
+                        "grid_options": {"columns": 20, "rows": "auto"},
+                    },
+                ],
+            },
+        ],
+    }
+
+
+def build_dashboard_config(
+    registry: er.EntityRegistry, entry_id: str, serials: list[str]
+) -> dict[str, Any] | None:
+    """Build the full dashboard config, or None if no pod has its entities registered yet."""
+    views = [v for serial in serials if (v := _build_view(registry, entry_id, serial))]
+    if not views:
+        return None
+    return {"views": views}
+
+
+async def async_ensure_dashboard(
+    hass: HomeAssistant, entry_id: str, serials: list[str]
+) -> set[str] | None:
+    """Create-or-update the Planetpod dashboard so its layout stays in sync with the code.
+
+    Returns the set of serials that actually got a view built and saved, or
+    None if nothing could be saved at all (registry not ready yet, or an
+    internal-API failure). A serial can legitimately be dropped from the
+    *requested* list if its entities aren't in the registry yet (see
+    _build_view) -- the caller must only treat the *returned* set as
+    "handled", so a pod whose entities were still registering when this ran
+    gets retried on its next coordinator update instead of being silently
+    left off the dashboard forever.
+    """
+    try:
+        from homeassistant.components.lovelace import dashboard as ll_dashboard
+        from homeassistant.components.lovelace.const import (
+            CONF_ALLOW_SINGLE_WORD,
+            CONF_ICON,
+            CONF_REQUIRE_ADMIN,
+            CONF_SHOW_IN_SIDEBAR,
+            CONF_TITLE,
+            CONF_URL_PATH,
+        )
+
+        registry = er.async_get(hass)
+        config = build_dashboard_config(registry, entry_id, serials)
+        if config is None:
+            return None
+
+        # Returning None makes the caller retry on the next coordinator
+        # update, so the dashboard appears once Mushroom gets installed.
+        if not await _async_mushroom_installed(hass):
+            ir.async_create_issue(
+                hass,
+                DOMAIN,
+                MUSHROOM_ISSUE_ID,
+                is_fixable=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key=MUSHROOM_ISSUE_ID,
+                learn_more_url=MUSHROOM_URL,
+            )
+            return None
+        ir.async_delete_issue(hass, DOMAIN, MUSHROOM_ISSUE_ID)
+
+        collection = ll_dashboard.DashboardsCollection(hass)
+        await collection.async_load()
+        item = next(
+            (i for i in collection.async_items() if i.get(CONF_URL_PATH) == DASHBOARD_URL_PATH),
+            None,
+        )
+        if item is None:
+            item = await collection.async_create_item(
+                {
+                    CONF_URL_PATH: DASHBOARD_URL_PATH,
+                    CONF_TITLE: DASHBOARD_TITLE,
+                    CONF_ICON: DASHBOARD_ICON,
+                    CONF_SHOW_IN_SIDEBAR: True,
+                    CONF_REQUIRE_ADMIN: False,
+                    CONF_ALLOW_SINGLE_WORD: False,
+                }
+            )
+            _LOGGER.warning(
+                "PLANETPOD: created the %s dashboard -- restart Home Assistant once to "
+                "see it in the sidebar (later layout updates apply without a restart)",
+                DASHBOARD_URL_PATH,
+            )
+
+        # Save through lovelace's own instance when it has one: it caches the
+        # config in memory, so writing via a second instance only updates the
+        # file and the sidebar keeps serving the old layout until a restart.
+        live = _live_dashboard(hass, DASHBOARD_URL_PATH)
+        if not isinstance(live, ll_dashboard.LovelaceStorage):
+            live = ll_dashboard.LovelaceStorage(hass, item)
+        await live.async_save(config)
+        return {view["path"].removeprefix("pod-") for view in config["views"]}
+    except Exception:  # noqa: BLE001 -- internal HA API, must never break integration setup
+        _LOGGER.exception("PLANETPOD: failed to auto-provision the dashboard (non-fatal)")
+        return None

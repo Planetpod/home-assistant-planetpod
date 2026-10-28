@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import UpdateFailed
 
 from custom_components.planetpod.const import DEFAULT_API_URL, DOMAIN, MANUFACTURER
-from custom_components.planetpod.sensor import SENSOR_DESCRIPTIONS
+from custom_components.planetpod.sensor import CLOUD_SENSOR_DESCRIPTIONS, SENSOR_DESCRIPTIONS
 from tests.conftest import MOCK_API_URL, MOCK_SERIAL
 
 
@@ -20,9 +20,11 @@ def _entity_id(sensor_key: str) -> str:
 
 
 async def test_sensor_count(hass: HomeAssistant, loaded_config_entry):
-    """One sensor entity per SENSOR_DESCRIPTIONS entry per pod."""
+    """A cloud entry gets the shared sensors plus the cloud-only ones (plain
+    Pod Mode, G1): the same set as before local mode existed, with no
+    local-only or energy sensors."""
     states = hass.states.async_all("sensor")
-    assert len(states) == len(SENSOR_DESCRIPTIONS)
+    assert len(states) == len(SENSOR_DESCRIPTIONS) + len(CLOUD_SENSOR_DESCRIPTIONS)
 
 
 async def test_soc_value(hass: HomeAssistant, loaded_config_entry):
@@ -71,3 +73,11 @@ async def test_sensor_unavailable_after_coordinator_failure(
     state = hass.states.get(_entity_id("state_of_charge"))
     assert state is not None
     assert state.state == STATE_UNAVAILABLE
+
+
+async def test_cloud_pod_mode_is_plain_text(hass: HomeAssistant, loaded_config_entry):
+    """Cloud Pod Mode stays as before local mode: the raw value, no ENUM labels."""
+    state = hass.states.get(_entity_id("pod_mode"))
+    assert state is not None
+    assert state.state == "normal"
+    assert state.attributes.get("device_class") is None

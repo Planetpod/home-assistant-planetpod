@@ -1,8 +1,10 @@
 """Sensor platform for Planetpod integration."""
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Callable
 
 from homeassistant.components.sensor import (
@@ -19,13 +21,133 @@ from homeassistant.const import (
     UnitOfTemperature,
     UnitOfElectricPotential,
     SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+    EntityCategory,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import ATTR_ATTRIBUTION, DOMAIN, MANUFACTURER
+from .const import (
+    ATTR_ATTRIBUTION,
+    CONF_CONNECTION_TYPE,
+    CONNECTION_TYPE_LOCAL,
+    DOMAIN,
+    ERROR_SEVERITY_LABELS,
+    MANUFACTURER,
+    POD_MODE_LABELS,
+)
 from .coordinator import PlanetpodDataUpdateCoordinator
+from .coordinator_local import PlanetpodLocalCoordinator
+from .energy import async_setup_energy_entities
+
+
+_ERROR_TIMESTAMP_FORMATS = (
+    "%Y-%m-%d %H:%M:%S",       # real firmware format, e.g. "2026-08-19 08:06:27"
+    "%Y-%m-%dT%H:%M:%S.%fZ",   # ISO, in case a future firmware version sends this
+    "%Y-%m-%dT%H:%M:%SZ",
+)
+
+
+def _parse_error_timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    for fmt in _ERROR_TIMESTAMP_FORMATS:
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def _sort_errors_newest_first(logs: list[dict]) -> list[dict]:
+    """Sort error log entries by timestamp, newest first.
+
+    Firmware's getErrors() (ErrorLogger.cpp) returns a
+    std::unordered_map<std::string, ErrorLog> -- C++ gives NO ordering
+    guarantee for unordered_map iteration, so the JSON array's order is
+    effectively arbitrary (hash-bucket order), not chronological or
+    insertion order -- confirmed with a real payload where an older E405
+    entry was last and a newer E402 was first. Entries with an unparsable
+    timestamp sort last rather than raising.
+    """
+    return sorted(
+        logs,
+        key=lambda entry: _parse_error_timestamp(entry.get("timestamp")) or datetime.min,
+        reverse=True,
+    )
+
+
+def _severity_label(entry: dict) -> str:
+    return ERROR_SEVERITY_LABELS.get(entry.get("severity"), "Unknown severity")
+
+
+def _format_error_entry(entry: dict) -> str:
+    """Format one error log entry as "[severity] code (type): description".
+
+    Firmware's ErrorInfoList isn't consistent -- some entries (e.g. E405)
+    have an empty `description` and carry their only text in `errorType`,
+    so code/type/description are each included only when populated.
+    """
+    code = entry.get("errorCode") or ""
+    error_type = entry.get("errorType") or ""
+    description = entry.get("description") or ""
+
+    text = f"[{_severity_label(entry)}]"
+    if code and error_type:
+        text += f" {code} ({error_type})"
+    else:
+        label = code or error_type
+        if label:
+            text += f" {label}"
+    if description:
+        text += f": {description}"
+    # startEnd is firmware's isActive: 0 means the error has cleared.
+    if entry.get("startEnd") == 0:
+        text += " (resolved)"
+    return text
+
+
+def _pretty_json(value: Any) -> str | None:
+    """Render a payload as indented JSON so it's actually readable as an
+    entity attribute -- HA's Developer Tools/more-info dialog show a raw
+    dict's repr() as one hard-to-read line, especially once it's nested a
+    few levels deep (systemInfo/bmsData/etc.). default=str covers datetime
+    objects (e.g. received_at/sent_at), which json.dumps can't serialize
+    directly.
+    """
+    if not value:
+        return None
+    return json.dumps(value, indent=2, default=str)
+
+
+def _format_last_error(pod: dict) -> str:
+    """Format every error in the latest POST, newest first.
+
+    One POST can legitimately carry more than one error at a time (e.g. a
+    just-resolved reboot notice alongside a currently-active connectivity
+    error) -- show all of them rather than collapsing to a single "most
+    important" one.
+    """
+    logs = pod.get("error_logs")
+    if not logs:
+        return "None"
+    formatted = [f for entry in _sort_errors_newest_first(logs) if (f := _format_error_entry(entry))]
+    if not formatted:
+        return "None"
+    text = "; ".join(formatted)
+    # HA rejects states over 255 chars; the full list stays in the attributes.
+    return text if len(text) <= 255 else text[:254] + "…"
+
+
+def _last_error_attrs(pod: dict) -> dict[str, Any]:
+    logs = pod.get("error_logs", [])
+    severities = [s for entry in logs if isinstance(s := entry.get("severity"), int)]
+    return {
+        "error_logs": logs,
+        "highest_severity": ERROR_SEVERITY_LABELS.get(max(severities)) if severities else None,
+    }
+
+AnyPlanetpodCoordinator = PlanetpodDataUpdateCoordinator | PlanetpodLocalCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,6 +157,7 @@ class PlanetpodSensorEntityDescription(SensorEntityDescription):
     """Describes a Planetpod sensor."""
 
     value_fn: Callable[[dict], Any] = lambda _: None
+    attr_fn: Callable[[dict], dict[str, Any]] = lambda _: {}
 
 
 SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
@@ -69,11 +192,6 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.ENUM,
         options=["cash", "solar", "solarSmart", "solarPure"],
         value_fn=lambda pod: pod["status"]["app_mode"],
-    ),
-    PlanetpodSensorEntityDescription(
-        key="pod_mode",
-        name="Pod Mode",
-        value_fn=lambda pod: pod["status"]["pod_mode"],
     ),
     PlanetpodSensorEntityDescription(
         key="deployed_power_kw",
@@ -174,13 +292,103 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
         state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda pod: pod["battery"]["soc_lower_limit_pct"],
     ),
+)
+
+# Local-only: their data comes from the pod's POST to HA, which the cloud API
+# doesn't provide, so they are created for local entries only.
+LOCAL_SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
+    PlanetpodSensorEntityDescription(
+        key="pod_mode",
+        name="Pod Mode",
+        translation_key="pod_mode",
+        device_class=SensorDeviceClass.ENUM,
+        options=list(POD_MODE_LABELS),
+        # A mode added in newer firmware must not break the ENUM state write.
+        value_fn=lambda pod: (
+            None
+            if (mode := pod["status"]["pod_mode"]) is None
+            else mode if mode in POD_MODE_LABELS else "unknown"
+        ),
+    ),
+    # Named with a "P1" prefix so they sort together on the device page.
+    PlanetpodSensorEntityDescription(
+        key="balance_source",
+        name="P1 Balance Source",
+        value_fn=lambda pod: pod.get("balance", {}).get("error")
+        or pod.get("balance", {}).get("source_label"),
+    ),
+    PlanetpodSensorEntityDescription(
+        key="balance_g1_power_delivered_kw",
+        name="P1 Power Delivered",
+        native_unit_of_measurement=UnitOfPower.KILO_WATT,
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda pod: pod.get("balance", {}).get("power_delivered_kw"),
+    ),
+    PlanetpodSensorEntityDescription(
+        key="balance_g1_power_returned_kw",
+        name="P1 Power Returned",
+        native_unit_of_measurement=UnitOfPower.KILO_WATT,
+        device_class=SensorDeviceClass.POWER,
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda pod: pod.get("balance", {}).get("power_returned_kw"),
+    ),
+    PlanetpodSensorEntityDescription(
+        key="speed_setpoint_status",
+        name="Speed Setpoint Status",
+        value_fn=lambda pod: pod.get("speed_setpoint_status"),
+    ),
+    # Diagnostic aid: lets you confirm what the pod is actually sending and
+    # when, from Developer Tools > States, without digging through HA logs.
+    # raw_payload is pretty-printed JSON (not the raw dict) so it's actually
+    # readable in the more-info dialog/Developer Tools attribute view rather
+    # than a single hard-to-read repr() line.
+    PlanetpodSensorEntityDescription(
+        key="last_post_received",
+        name="Last POST Received",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda pod: pod.get("raw_post", {}).get("received_at"),
+        attr_fn=lambda pod: {"raw_payload": _pretty_json(pod.get("raw_post", {}).get("payload"))},
+    ),
+    # Mirrors "Last POST Received" for the other direction -- what HA most
+    # recently sent back to the pod in a GET response, and when.
+    PlanetpodSensorEntityDescription(
+        key="last_get_sent",
+        name="Last GET Sent",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda pod: pod.get("raw_get", {}).get("sent_at"),
+        attr_fn=lambda pod: {"raw_response": _pretty_json(pod.get("raw_get", {}).get("response"))},
+    ),
+    # Local-mode only: surfaces the SCU/BMS errorLogs field from the raw
+    # POST, which the cloud REST API never exposes. The state itself lists
+    # every error in the latest POST, newest first (see _format_last_error),
+    # with the full raw list as an attribute.
+    PlanetpodSensorEntityDescription(
+        key="last_error",
+        name="Last Error",
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=_format_last_error,
+        attr_fn=_last_error_attrs,
+    ),
+)
+
+# Cloud-only: kept exactly as before local mode existed. The cloud API also
+# supplies the computed "g1" section, which local pod data doesn't have.
+CLOUD_SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
+    PlanetpodSensorEntityDescription(
+        key="pod_mode",
+        name="Pod Mode",
+        value_fn=lambda pod: pod["status"]["pod_mode"],
+    ),
     PlanetpodSensorEntityDescription(
         key="g1_solar_power_kw",
         name="G1 Solar Power",
         native_unit_of_measurement=UnitOfPower.KILO_WATT,
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda pod: pod["g1"]["solar_power_kw"],
+        value_fn=lambda pod: pod.get("g1", {}).get("solar_power_kw"),
     ),
     PlanetpodSensorEntityDescription(
         key="g1_raw_solar_current_a",
@@ -188,7 +396,7 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
         native_unit_of_measurement=UnitOfElectricCurrent.AMPERE,
         device_class=SensorDeviceClass.CURRENT,
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda pod: pod["g1"]["raw_solar_current_a"],
+        value_fn=lambda pod: pod.get("g1", {}).get("raw_solar_current_a"),
     ),
     PlanetpodSensorEntityDescription(
         key="g1_solar_phase",
@@ -196,7 +404,7 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
         translation_key="g1_solar_phase",
         device_class=SensorDeviceClass.ENUM,
         options=["single", "three"],
-        value_fn=lambda pod: pod["g1"]["solar_phase"],
+        value_fn=lambda pod: pod.get("g1", {}).get("solar_phase"),
     ),
     PlanetpodSensorEntityDescription(
         key="g1_grid_import_power_kw",
@@ -204,7 +412,7 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
         native_unit_of_measurement=UnitOfPower.KILO_WATT,
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda pod: pod["g1"]["grid_import_power_kw"],
+        value_fn=lambda pod: pod.get("g1", {}).get("grid_import_power_kw"),
     ),
     PlanetpodSensorEntityDescription(
         key="g1_grid_export_power_kw",
@@ -212,7 +420,7 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
         native_unit_of_measurement=UnitOfPower.KILO_WATT,
         device_class=SensorDeviceClass.POWER,
         state_class=SensorStateClass.MEASUREMENT,
-        value_fn=lambda pod: pod["g1"]["grid_export_power_kw"],
+        value_fn=lambda pod: pod.get("g1", {}).get("grid_export_power_kw"),
     ),
 )
 
@@ -223,9 +431,14 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up sensor platform for Planetpod."""
-    coordinator: PlanetpodDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: AnyPlanetpodCoordinator = hass.data[DOMAIN][entry.entry_id]
 
     known_serials: set[str] = set()
+    known_energy_ids: set[str] = set()
+    is_local = entry.data.get(CONF_CONNECTION_TYPE) == CONNECTION_TYPE_LOCAL
+    descriptions = SENSOR_DESCRIPTIONS + (
+        LOCAL_SENSOR_DESCRIPTIONS if is_local else CLOUD_SENSOR_DESCRIPTIONS
+    )
 
     def _add_new_pods() -> None:
         """Add sensors for any pods not yet registered."""
@@ -236,10 +449,20 @@ async def async_setup_entry(
             if not serial or serial in known_serials:
                 continue
             known_serials.add(serial)
-            for description in SENSOR_DESCRIPTIONS:
+            for description in descriptions:
                 new_entities.append(PlanetpodSensor(coordinator, entry, description, serial))
         if new_entities:
             async_add_entities(new_entities, False)
+
+        # Backs the local dashboard's Energy card -- integrates P1/deployed
+        # power into kWh. Registered after the pod's power sensors above so
+        # their unique_ids already exist in the entity registry for lookup.
+        if is_local:
+            hass.async_create_task(
+                async_setup_energy_entities(
+                    hass, entry, lambda ents: async_add_entities(ents, False), known_energy_ids, pods
+                )
+            )
 
     # Register initial pods
     _add_new_pods()
@@ -248,7 +471,7 @@ async def async_setup_entry(
     entry.async_on_unload(coordinator.async_add_listener(_add_new_pods))
 
 
-class PlanetpodSensor(CoordinatorEntity[PlanetpodDataUpdateCoordinator], SensorEntity):
+class PlanetpodSensor(CoordinatorEntity[AnyPlanetpodCoordinator], SensorEntity):
     """Representation of a Planetpod sensor."""
 
     entity_description: PlanetpodSensorEntityDescription
@@ -257,7 +480,7 @@ class PlanetpodSensor(CoordinatorEntity[PlanetpodDataUpdateCoordinator], SensorE
 
     def __init__(
         self,
-        coordinator: PlanetpodDataUpdateCoordinator,
+        coordinator: AnyPlanetpodCoordinator,
         entry: ConfigEntry,
         description: PlanetpodSensorEntityDescription,
         serial_number: str,
@@ -294,8 +517,35 @@ class PlanetpodSensor(CoordinatorEntity[PlanetpodDataUpdateCoordinator], SensorE
 
     @property
     def available(self) -> bool:
-        """Return availability."""
-        return super().available and self._get_pod() is not None
+        """Return availability.
+
+        Once a pod goes offline, its last-known payload is still sitting in
+        the coordinator (nothing clears it), so without this every
+        live-data sensor (charge status, SoC, deployed power, ...) would
+        keep reporting stale numbers as if the pod were still responding.
+        The "Online" sensor itself and the diagnostic ones (raw POST/GET,
+        error log) are exempt -- they're exactly what you'd check to see
+        *that* and *when* a pod went offline, so they must stay available.
+        """
+        pod = self._get_pod()
+        if not super().available or pod is None:
+            return False
+        if self.entity_description.key == "online":
+            return True
+        if self.entity_description.entity_category == EntityCategory.DIAGNOSTIC:
+            return True
+        return bool(pod.get("status", {}).get("online", True))
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return per-sensor extra attributes, if this description defines any."""
+        pod = self._get_pod()
+        if pod is None:
+            return {}
+        try:
+            return self.entity_description.attr_fn(pod)
+        except (KeyError, TypeError):
+            return {}
 
     def _get_pod(self) -> dict | None:
         """Find this sensor's pod in coordinator data."""
