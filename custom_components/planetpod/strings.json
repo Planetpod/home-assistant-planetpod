@@ -10,7 +10,7 @@
       },
       "cloud": {
         "title": "Connect to Planetpod",
-        "description": "Enter your Planetpod Open API credentials. You can generate a key in the Planetpod app under Settings → API.",
+        "description": "Enter your Planetpod Open API credentials. Request a token in the Planetpod app under Instellingen → Integratie → Home Assistant Cloud → Aanvragen.",
         "data": {
           "api_key": "API Key"
         },
@@ -112,7 +112,12 @@
           "cash": "Cash",
           "solar": "Solar",
           "solarSmart": "Solar Smart",
-          "solarPure": "Solar Pure"
+          "solarPure": "Solar Pure",
+          "open": "Open",
+          "open_homeAssistant": "Home Assistant",
+          "open_homey_cloud": "Homey Cloud",
+          "open_homey_pro": "Homey Pro",
+          "unknown": "Unknown"
         }
       },
       "pod_mode": {

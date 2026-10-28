@@ -51,13 +51,14 @@ Sensor data is routed through Planetpod's servers via the Open API. This is the 
 ### Generating an API token
 
 1. Open the Planetpod app
-2. Go to **Instellingen → Planetpod beheer**
-3. Scroll down to the **Open API** section
-4. Tap **Token aanmaken**
-5. Tap the copy button next to the token — it is only shown once
-6. The token starts with `pp_` and is valid for 1 year
+2. Go to **Instellingen → Integratie**
+3. Next to **Home Assistant Cloud**, tap **Aanvragen**
+4. Tap the token to copy it. Only an admin of the Planetpod account can see and copy it.
+5. The token starts with `pp_` and is valid for 1 year. It stays saved in the app on that phone, so you can copy it again later.
 
-> Generating a new token revokes the previous one. If you rotate the token, Home Assistant will show a re-authentication banner — enter the new token there.
+> Your Planetpod has one token at a time. Requesting a new one (**Vernieuw**) revokes the previous one, including a Homey Cloud token. After a renewal, Home Assistant shows a re-authentication banner; enter the new token there.
+>
+> On an older app version, the token is under **Instellingen → Planetpod beheer → Open API → Token aanmaken**, and it is only shown once.
 
 ### Set up
 
