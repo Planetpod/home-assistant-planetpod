@@ -11,7 +11,7 @@ You can find the Planetpod manual with more information here: https://drive.goog
 | Control entities | No | Yes (Mode, SoC limits, Speed/Planning setpoints, one-shot actions) |
 | Setup | Paste an Open API token | Install the beta, have the pod switched to Home Assistant mode, follow the config flow |
 
-Both connection types expose the same [sensors](#sensors); Local mode additionally exposes control entities and a bundled dashboard.
+Both connection types share the core battery [sensors](#sensors). Cloud mode adds the Energy Pulse (G1) sensors; Local mode adds P1 and diagnostic sensors, control entities and a bundled dashboard.
 
 ---
 
@@ -363,7 +363,7 @@ Home Assistant marks a pod **offline** when nothing has arrived from it for 60 s
 
 ## Sensors
 
-One device is created per battery (identified by serial number). Energy Pulse (G1) data is included on the same device; multiple Energy Pulses are not supported. The following sensors are available:
+One device is created per battery (identified by serial number). In Cloud mode, Energy Pulse (G1) data is included on the same device; multiple Energy Pulses are not supported. The following sensors are available:
 
 | Sensor | Source | Unit | Description | Possible values |
 |---|---|---|---|---|
