@@ -9,7 +9,7 @@ You can find the Planetpod manual with more information here: https://drive.goog
 | Data path | Through Planetpod's servers (Open API) | Direct, pod ↔ Home Assistant on your LAN |
 | Poll interval | Every 60 seconds | Every ~10 seconds (pod-driven push) |
 | Control entities | No | Yes (Mode, SoC limits, Speed/Planning setpoints, one-shot actions) |
-| Setup | Paste an Open API token | Install the beta, have the pod switched to Home Assistant mode, follow the config flow |
+| Setup | Paste an Open API token | Switch the pod to Home Assistant mode in the app, follow the config flow |
 
 Both connection types share the core battery [sensors](#sensors). Cloud mode adds the Energy Pulse (G1) sensors; Local mode adds P1 and diagnostic sensors, control entities and a bundled dashboard.
 
@@ -28,12 +28,7 @@ Click the button below to add the repository to HACS on your Home Assistant inst
 
 [![Open your Home Assistant instance and add this repository to HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=Planetpod&repository=home-assistant-planetpod&category=integration)
 
-Then click **Download**, and pick the version that matches the mode you want:
-
-- **Cloud mode:** the latest stable release.
-- **Local mode:** the newest **v1.1.0-beta** release. Local mode is only in the beta releases for now. In the download dialog, enable **Show beta versions** to see them. Afterwards, do **not** accept the "update" HACS offers to the stable release: that installs v1.0.0, which has no Local mode.
-
-Restart Home Assistant after downloading, then follow the section for your mode.
+Then click **Download**, confirm, and restart Home Assistant. Cloud and Local mode are in the same release; you choose the mode when you add the integration. Then follow the section for your mode.
 
 <details>
 <summary>Manual steps (if the button doesn't work)</summary>
@@ -42,7 +37,7 @@ Restart Home Assistant after downloading, then follow the section for your mode.
 2. Click the three-dot menu (⋮) in the top right and select **Custom repositories**
 3. Paste `https://github.com/Planetpod/home-assistant-planetpod` and set category to **Integration**
 4. Click **Add**
-5. Search for **Planetpod**, click **Download** (pick the version as described above), confirm, and restart Home Assistant
+5. Search for **Planetpod**, click **Download**, confirm, and restart Home Assistant
 
 </details>
 
@@ -76,11 +71,11 @@ Tokens expire after 1 year by default. When a token expires or is revoked, Home 
 </details>
 
 <details>
-<summary><strong>🏠 Local mode</strong> (beta)</summary>
+<summary><strong>🏠 Local mode</strong></summary>
 
 The pod talks directly to Home Assistant over your own network, through a local HTTP endpoint HA exposes at `/planetpod`, so commands and data don't make a cloud round-trip. The pod keeps its normal connection to Planetpod's cloud alongside it.
 
-> Requires **pod firmware 1.1.11 or later** and the **beta release** (see [Install via HACS](#install-via-hacs)). One Planetpod integration handles **every pod on your network**: each pod gets its own device, entities and dashboard view, and is controlled independently.
+> Requires **pod firmware 1.1.11 or later**. One Planetpod integration handles **every pod on your network**: each pod gets its own device, entities and dashboard view, and is controlled independently.
 
 > **Privacy:** Local mode does not send any sensitive information anywhere — only battery telemetry/control data (the same fields listed in [Sensors](#sensors)) and the connection to Planetpod's cloud that already exists independently of this integration.
 
