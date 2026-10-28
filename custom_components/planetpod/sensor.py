@@ -28,6 +28,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
+    APP_MODE_LABELS,
     ATTR_ATTRIBUTION,
     CONF_CONNECTION_TYPE,
     CONNECTION_TYPE_LOCAL,
@@ -190,8 +191,13 @@ SENSOR_DESCRIPTIONS: tuple[PlanetpodSensorEntityDescription, ...] = (
         name="App Mode",
         translation_key="app_mode",
         device_class=SensorDeviceClass.ENUM,
-        options=["cash", "solar", "solarSmart", "solarPure"],
-        value_fn=lambda pod: pod["status"]["app_mode"],
+        options=list(APP_MODE_LABELS),
+        # A modus added in the backend must not break the ENUM state write.
+        value_fn=lambda pod: (
+            None
+            if (mode := pod["status"]["app_mode"]) is None
+            else mode if mode in APP_MODE_LABELS else "unknown"
+        ),
     ),
     PlanetpodSensorEntityDescription(
         key="deployed_power_kw",

@@ -106,6 +106,19 @@ POD_MODE_LABELS: dict[str, str] = {
     "unknown": "Unknown",
 }
 
+# status.app_mode: the backend's modus enum (planetpod_modus.ts).
+APP_MODE_LABELS: dict[str, str] = {
+    "cash": "Cash",
+    "solar": "Solar",
+    "solarSmart": "Solar Smart",
+    "solarPure": "Solar Pure",
+    "open": "Open",
+    "open_homeAssistant": "Home Assistant",
+    "open_homey_cloud": "Homey Cloud",
+    "open_homey_pro": "Homey Pro",
+    "unknown": "Unknown",
+}
+
 # errorLogs[].severity, firmware's e_Error_Severety (ErrorLogger.h).
 ERROR_SEVERITY_LABELS: dict[int, str] = {
     1: "Info",

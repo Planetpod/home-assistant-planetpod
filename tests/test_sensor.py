@@ -1,6 +1,7 @@
 """Tests for Planetpod sensor platform."""
 from __future__ import annotations
 
+import copy
 from unittest.mock import patch
 
 import pytest
@@ -50,6 +51,26 @@ async def test_app_mode(hass: HomeAssistant, loaded_config_entry):
     state = hass.states.get(_entity_id("app_mode"))
     assert state is not None
     assert state.state == "solar"
+
+
+@pytest.mark.parametrize(
+    ("app_mode", "expected"),
+    [("open_homeAssistant", "open_homeAssistant"), ("some_future_modus", "unknown")],
+)
+async def test_app_mode_switch_does_not_stop_other_sensors(
+    hass: HomeAssistant, loaded_config_entry, app_mode, expected
+):
+    """A switch to an open (or unknown) modus must not raise and freeze later sensors."""
+    coordinator = hass.data[DOMAIN][loaded_config_entry.entry_id]
+    data = copy.deepcopy(coordinator.data)
+    data["pods"][0]["status"]["app_mode"] = app_mode
+    data["pods"][0]["power_control"]["deployed_power_kw"] = 2.5
+    with patch.object(coordinator, "_async_update_data", return_value=data):
+        await coordinator.async_refresh()
+    await hass.async_block_till_done()
+
+    assert hass.states.get(_entity_id("app_mode")).state == expected
+    assert hass.states.get(_entity_id("deployed_power")).state == "2.5"
 
 
 async def test_device_info(hass: HomeAssistant, loaded_config_entry):
